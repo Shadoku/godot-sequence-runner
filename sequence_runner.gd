@@ -9,6 +9,8 @@ static var label_cache: Dictionary = {}
 @export_file("*.xml") var xml_path: String = ""
 @export var auto_start: bool = false
 @export var target_self: bool = false
+## Print what the runner does (its target, each goto's jump) for debugging.
+@export var verbose: bool = false
 
 var target: Node = null
 var sequence := []
@@ -26,10 +28,12 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	register_commands()
 	if target == null:
-		print("Targeting parent")
+		if verbose:
+			print("Targeting parent")
 		target = get_parent()
 	if target_self == true:	
-		print("Targeting self")
+		if verbose:
+			print("Targeting self")
 		target = self
 	if auto_start == true && xml_path != "":
 		start()
@@ -38,17 +42,20 @@ func _ready() -> void:
 	#run_sequence(sequence)
 	#pass # Replace with function body.
 	
-func start(path: String = "") -> void:
+## Runs the sequence at `path` (or xml_path). `vars` seeds the scratch pad after
+## its reset, so the sequence can read them as `$name`.
+func start(path: String = "", vars: Dictionary = {}) -> void:
 	xml_path = path if path != "" else xml_path
 	if xml_path == "":
 		printerr("sequence_runner: no xml path set")
 		return
 	index = 0
 	scratch_pad = {}
+	scratch_pad.merge(vars)
 	var parsed := parse_xml(xml_path)
 	sequence = compile_sequence(parsed)
 	if label_cache.has(xml_path):
-		scratch_pad.merge(label_cache[xml_path])
+		scratch_pad.merge(label_cache[xml_path], true)
 	if not sequence:
 		printerr("No compiled sequence found")
 		return
@@ -58,12 +65,13 @@ func start(path: String = "") -> void:
 		run_sequence(sequence)
 		
 #sequence_runner.attach($node, "res://data/sequences/whatever.xml")
-static func attach(node: Node, xml: String, auto: bool = false) -> sequence_runner:
+## `vars` seed the scratch pad when `auto` starts the runner here.
+static func attach(node: Node, xml: String, auto: bool = false, vars: Dictionary = {}) -> sequence_runner:
 	var runner := sequence_runner.new()
 	runner.xml_path = xml
 	node.add_child(runner)
 	if auto:
-		runner.start()
+		runner.start("", vars)
 	return runner
 	
 func register_commands() -> void:
@@ -78,7 +86,8 @@ func register_commands() -> void:
 		"unpause": factory_unpause,
 		"set": factory_set,
 		"goto_if": factory_goto_if,
-		"tween_move": factory_tween_move
+		"tween_move": factory_tween_move,
+		"wait_signal": factory_wait_signal
 	}
 
 
@@ -151,7 +160,8 @@ func cmd_unpause() -> Callable:
 		
 func cmd_goto(label: String) -> Callable:
 	return func():
-		print("Jumping to: ", label)
+		if verbose:
+			print("Jumping to: ", label)
 		index = scratch_pad[label]
 		return null
 		
@@ -201,13 +211,22 @@ func cmd_call(on: String, method: String, args_tokens: Array) -> Callable:
 		var resolved_args: Array = []
 		for token in args_tokens:
 			if token is String:
-				resolved_args.append(resolve_value(token))
+				resolved_args.append(to_number(resolve_value(token)))
 			else:
 				resolved_args.append(token)
 		if target_node and target_node.has_method(method):
 			target_node.callv(method, resolved_args)
 		else:
 			printerr("cmd_call: cannot locate object and/or method: ", on, ":", method)
+		return null
+		
+## Waits for `signal_name` on the object `on` names (resolved like call's `on`).
+func cmd_wait_signal(on: String, signal_name: String) -> Callable:
+	return func() -> Variant:
+		var source: Object = resolve_target(on)
+		if source and source.has_signal(signal_name):
+			return Signal(source, signal_name)
+		printerr("cmd_wait_signal: cannot locate object and/or signal: ", on, ":", signal_name)
 		return null
 		
 func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
@@ -428,6 +447,17 @@ func resolve_value(token: String) -> Variant:
 	printerr("resolve_value: unresolvable reference: ", token)
 	return float(token)
 	
+## A String that reads as an int or a float becomes that number, so a call's
+## arguments reach typed parameters; any other value is returned as it is.
+func to_number(value: Variant) -> Variant:
+	if value is String:
+		var text: String = value
+		if text.is_valid_int():
+			return text.to_int()
+		if text.is_valid_float():
+			return text.to_float()
+	return value
+	
 func resolve_random(token: String) -> float:
 	var opperands := token.trim_prefix("random(").trim_suffix(")")
 	var parts := opperands.split(",")
@@ -538,6 +568,11 @@ func factory_goto_if(args: Dictionary, index: int) -> Callable:
 	var op: String = args.get("op", "0")
 	var value: String = args.get("value", "0")
 	return cmd_goto_if(lable, var_name, op, value)
+
+func factory_wait_signal(args: Dictionary, index: int) -> Callable:
+	var on: String = args.get("on", "target")
+	var signal_name: String = args.get("signal", "")
+	return cmd_wait_signal(on, signal_name)
 
 func factory_tween_move(args: Dictionary, index: int) -> Callable:
 	return cmd_tween_move(str(args.get("x", 0)), str(args.get("y", 0)), str(args.get("duration", 0)))
