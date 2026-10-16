@@ -6,7 +6,7 @@ static var label_cache: Dictionary = {}
 
 #Reusable sequence runner. Attach to node, set xml_path, then call start()
 
-@export_dir var xml_path: String = ""
+@export_file("*.xml") var xml_path: String = ""
 @export var auto_start: bool = false
 @export var target_self: bool = false
 
@@ -166,11 +166,11 @@ func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 		if target is AnimatedSprite2D:
 			anim_target = target
 		elif node_path != "":
-			if not scratch_pad.has("anim_target"):
+			if not scratch_pad.has("anim_target_" + node_path):
 				anim_target = target.get_node_or_null(node_path) as AnimatedSprite2D
-				scratch_pad["anim_target"] = anim_target
+				scratch_pad["anim_target_" + node_path] = anim_target
 			else: 
-				anim_target = scratch_pad["anim_target"]
+				anim_target = scratch_pad["anim_target_" + node_path]
 		else:
 			if not scratch_pad.has("anim_target"):
 				anim_target = find_animated_sprite(target)
@@ -188,7 +188,7 @@ func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 		
 func find_animated_sprite(node: Node) -> AnimatedSprite2D:
 	for child in node.get_children():
-		if child is AnimatableBody2D:
+		if child is AnimatedSprite2D:
 			return child
 		var result := find_animated_sprite(child)
 		if result:
@@ -416,7 +416,7 @@ func resolve_value(token: String) -> Variant:
 	if token.begins_with("random("):
 		return resolve_random(token)
 	if token.begins_with("random_int("):
-		return resolve_random(token)
+		return resolve_random_int(token)
 	if not token.begins_with("$"):
 		return token
 	var ref := token.substr(1)
@@ -439,13 +439,13 @@ func resolve_random(token: String) -> float:
 	return randf_range(min_val, max_val)
 	
 func resolve_random_int(token: String) -> int:
-	var opperands := token.trim_prefix("random(").trim_suffix(")")
+	var opperands := token.trim_prefix("random_int(").trim_suffix(")")
 	var parts := opperands.split(",")
 	if parts.size() != 2:
-		printerr("resolve_random: Expected 'random(min,max),' got: ", token)
+		printerr("resolve_random_int: Expected 'random_int(min,max),' got: ", token)
 		return 0
-	var min_val := float(resolve_value(parts[0].strip_edges()))
-	var max_val := float(resolve_value(parts[1].strip_edges()))
+	var min_val := int(resolve_value(parts[0].strip_edges()))
+	var max_val := int(resolve_value(parts[1].strip_edges()))
 	return randi_range(min_val, max_val)
 	
 func resolve_property_path(path: String) -> Variant:
@@ -505,7 +505,8 @@ func factory_goto(args: Dictionary, index: int) -> Callable:
 
 func factory_play_anim(args: Dictionary, index: int) -> Callable:
 	var anim: String = args.get("anim", "")
-	return cmd_play_anim(anim)
+	var node_path: String = args.get("node_path", "")
+	return cmd_play_anim(anim, node_path)
 	
 func factory_call(args: Dictionary, index: int) -> Callable:
 	var method: String = args.get("method", "")
