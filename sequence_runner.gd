@@ -123,6 +123,7 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 			result.append(command_factories[name].call(args, result.size()))
 		else:
 			printerr("Unknown command: ", name)
+			result.append(func(): return null)
 	return result
 		
 	
@@ -234,7 +235,7 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 		if expr != "":
 			scratch_pad[var_name] = evaluate_expr(expr)
 		else:
-			scratch_pad[var_name] = value
+			scratch_pad[var_name] = resolve_value(value) if value is String else value
 			
 func cmd_goto_if(label: String, var_token: String, op: String, value_token: String) -> Callable:
 	return func():
@@ -283,10 +284,11 @@ func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Call
 		tween.tween_property(target, "global_position", pos, float(resolve_value(dur_token)))
 		return tween.finished
 		
-func run_sequence(sequence: Array) -> void:
+func run_sequence(commands: Array) -> void:
 	if running:
 		return
 	running = true
+	sequence = commands
 	
 	while running && index < sequence.size():
 		var current: Callable = sequence[index]
@@ -403,7 +405,7 @@ func evaluate_expr(expr: String) -> Variant:
 			"*":
 				return left * right
 			"/":
-				if right != 0 && left != 0:
+				if right != 0:
 					return left / right
 				else:
 					printerr("evaluate_expr: attempt to divide by zero")
