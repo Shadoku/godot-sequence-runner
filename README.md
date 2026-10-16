@@ -9,12 +9,26 @@ An XML-driven command sequencer for Godot 4. Define movement, animation, timing,
 **Attach from code:**
 
 ```gdscript
-var runner = sequence_runner.attach($Enemy, "res://data/sequences/patrol.xml", true)
+var runner := sequence_runner.attach($Enemy, "res://data/sequences/patrol.xml", true)
 
 # Or start manually
-var runner = sequence_runner.attach($Enemy, "res://data/sequences/intro.xml")
+var runner := sequence_runner.attach($Enemy, "res://data/sequences/intro.xml")
 runner.start()
 ```
+
+**Pass variables in:** `start(path := "", vars := {})` runs the sequence at `path` (or `xml_path` when `path` is empty). The scratch pad is reset on every `start()`, then `vars` are merged into it, so the sequence reads them as `$name`:
+
+```gdscript
+runner.start("res://data/sequences/attack.xml", {"damage": 12})
+# or when attaching: attach(node, xml, auto := false, vars := {}) hands vars to start() when auto is true
+sequence_runner.attach($Enemy, "res://data/sequences/attack.xml", true, {"damage": 12})
+```
+
+```xml
+<call on="target" method="take_damage" arg0="$damage" />
+```
+
+Labels are merged after the variables, so a variable named like a label is replaced by the label.
 
 **Listen for completion:**
 
@@ -26,9 +40,10 @@ runner.sequence_finished.connect(_on_sequence_done)
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `xml_path` | String | `""` | Path to the XML sequence file |
+| `xml_path` | String (`*.xml` file) | `""` | Path to the XML sequence file |
 | `auto_start` | bool | `false` | Run automatically on `_ready` |
 | `target_self` | bool | `false` | Target the runner node instead of its parent |
+| `verbose` | bool | `false` | Print debug output: the chosen target (`Targeting parent` / `Targeting self`) and each `goto` jump (`Jumping to: ...`) |
 
 ## XML Format
 
@@ -55,6 +70,7 @@ runner.sequence_finished.connect(_on_sequence_done)
 | `move` | `x`, `y` | Set the target's `global_position` instantly |
 | `tween_move` | `x`, `y`, `duration` | Smoothly move the target over a duration (async) |
 | `wait` | `seconds` | Pause the sequence for a duration |
+| `wait_signal` | `on` (default `target`), `signal` | Pause the sequence until that object emits the signal (async) |
 | `label` | `name` | Define a named jump target |
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
@@ -75,6 +91,8 @@ Set variables with `set` and reference them anywhere with the `$` prefix:
 ```
 
 Expressions support basic arithmetic: `$a + 1`, `$speed * 2`, `$hp - 25`, `$total / 4`.
+
+`set`'s `value` is resolved like any other token (`$other`, `random(...)`, `random_int(...)`); `expr` evaluates arithmetic. Variables can also be seeded from code with `start(path, vars)` (see Getting Started).
 
 ### Random Values
 
@@ -108,15 +126,28 @@ Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`).
 
 `call` targets `"target"` (parent) by default. Use `"self"` for the runner, or a path from `/root/`. Resolved targets are cached for the duration of the run.
 
+Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`), then a string that reads as a number becomes one: `"6"` is passed as the int `6`, `"0.5"` as the float `0.5`, so methods with typed parameters (`func take_damage(n: int)`) can be called. Any other string is passed as it is.
+
 ```xml
 <call method="queue_free" />
 <call on="target" method="set_health" arg0="100" />
+<call on="target" method="take_damage" arg0="$damage" />
 <call on="Game/UI/HUD" method="show_message" arg0="Hello!" />
+```
+
+### Waiting for Signals
+
+`wait_signal` pauses the sequence until an object emits a signal, so a sequence can wait for the game (a `call` followed by a `wait` cannot). `on` is resolved like `call`'s (`target` by default, `self`, or a path from `/root/`). If the object or the signal does not exist, it prints an error and the sequence carries on without waiting.
+
+```xml
+<call on="target" method="drop" />
+<wait_signal on="target" signal="drop_finished" />
+<play_anim anim="celebrate" />
 ```
 
 ### Animation
 
-`play_anim` looks for an `AnimatedSprite2D` in this order: the target itself, a child at `node_path` if provided, or the first `AnimatedSprite2D` found recursively in the target's children. The result is cached after the first lookup.
+`play_anim` looks for an `AnimatedSprite2D` in this order: the target itself, the node at `node_path` (relative to the target) if provided, or the first `AnimatedSprite2D` found recursively in the target's children. The result is cached after the first lookup, per `node_path`.
 
 ```xml
 <play_anim anim="walk_right" />
@@ -130,7 +161,7 @@ Place a `<trigger>` before `<sequence>` to control when it starts.
 | Type | Attributes | Behavior |
 |---|---|---|
 | `auto` | — | Runs immediately |
-| `manual` | — | Must call `runner.start()` from code |
+| `manual` | — | Runs when code calls `runner.start()` (no `auto_start`) |
 | `signal` | `source`, `signal`, `filter_group` | Waits for a signal from a relative node |
 | `timer` | `seconds` | Starts after a one-shot delay |
 
@@ -189,30 +220,39 @@ Place a `<trigger>` before `<sequence>` to control when it starts.
 </sequence>
 ```
 
-**Chain into another sequence:**
+**Chain into another sequence** (the runner switches to it at once; its scratch pad is reset):
 ```xml
 <call on="self" method="start" arg0="res://data/sequences/phase_2.xml" />
+```
+
+**Wait for the game:**
+```xml
+<sequence>
+  <call on="target" method="start_turn" />
+  <wait_signal on="target" signal="turn_finished" />
+  <call on="Game/UI/HUD" method="show_message" arg0="Your move" />
+</sequence>
 ```
 
 ## Extending
 
 Add a command in three steps:
 
-**1. Command function** — returns a `Callable` that returns `null` (instant) or a `Signal` (async):
+**1. Command function** — returns a `Callable` that returns `null` (instant) or a `Signal` (async) on every path:
 
 ```gdscript
 func cmd_scale(x_token: String, y_token: String) -> Callable:
-    return func():
+    return func() -> Variant:
         var x := float(resolve_value(x_token))
         var y := float(resolve_value(y_token))
         target.scale = Vector2(x, y)
         return null
 ```
 
-**2. Factory function** — maps XML attributes to command arguments:
+**2. Factory function** — maps XML attributes to command arguments (the second argument is the command's index in the compiled sequence):
 
 ```gdscript
-func factory_scale(args: Dictionary, index: int) -> Callable:
+func factory_scale(args: Dictionary, _index: int) -> Callable:
     return cmd_scale(str(args.get("x", "1")), str(args.get("y", "1")))
 ```
 
@@ -224,8 +264,17 @@ command_factories["scale"] = factory_scale
 
 Then use it: `<scale x="2" y="2" />`
 
-For project-specific commands, subclass and call `super.register_commands()` to keep the built-ins.
+For project-specific commands, subclass and call `super.register_commands()` to keep the built-ins:
+
+```gdscript
+class_name MySequenceRunner
+extends sequence_runner
+
+func register_commands() -> void:
+    super.register_commands()
+    command_factories["scale"] = factory_scale
+```
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned during compilation and stored separately from the command array as index pointers. Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call. Resolved targets (from `call`) are also cached in the scratch pad to avoid repeated lookups.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned during compilation and stored separately from the command array as index pointers. Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Resolved targets (from `call`) are also cached in the scratch pad to avoid repeated lookups.
