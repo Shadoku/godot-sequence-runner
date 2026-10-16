@@ -6,17 +6,20 @@ static var label_cache: Dictionary = {}
 
 #Reusable sequence runner. Attach to node, set xml_path, then call start()
 
+## The XML sequence file start() runs when it is given no path.
 @export_file("*.xml") var xml_path: String = ""
+## Start the sequence on _ready.
 @export var auto_start: bool = false
+## Drive the runner node itself instead of its parent.
 @export var target_self: bool = false
 ## Print what the runner does (its target, each goto's jump) for debugging.
 @export var verbose: bool = false
 
 var target: Node = null
-var sequence := []
+var sequence: Array[Callable] = []
 var running: bool = false
-var index := 0
-var scratch_pad := {}
+var index: int = 0
+var scratch_pad: Dictionary = {}
 var command_factories: Dictionary = {}
 var trigger_config: Dictionary = {}
 
@@ -106,29 +109,29 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 	var result : Array[Callable] = []
 	#store labels first:
 	var label_map: Dictionary = {}
-	for i in range(parsed.size()):
+	for i: int in range(parsed.size()):
 		var cmd: Dictionary = parsed[i]
 		if cmd.get("name", "") == "label":
 			label_map[cmd["args"].get("name", "")] = i
 			
 	label_cache[xml_path] = label_map
 	
-	for cmd in parsed:
-		var name: String = cmd.get("name", "")
-		if name == "label":
-			result.append(func(): return null)
+	for cmd: Dictionary in parsed:
+		var cmd_name: String = cmd.get("name", "")
+		if cmd_name == "label":
+			result.append(func() -> Variant: return null)
 			continue
 		var args: Dictionary = cmd.get("args", {})
-		if command_factories.has(name):
-			result.append(command_factories[name].call(args, result.size()))
+		if command_factories.has(cmd_name):
+			result.append(command_factories[cmd_name].call(args, result.size()))
 		else:
-			printerr("Unknown command: ", name)
-			result.append(func(): return null)
+			printerr("Unknown command: ", cmd_name)
+			result.append(func() -> Variant: return null)
 	return result
 		
 	
 func cmd_move(x_token: String, y_token: String) -> Callable:
-	return func():
+	return func() -> Variant:
 		if target:
 			var x := float(resolve_value(x_token))
 			var y := float(resolve_value(y_token))
@@ -137,30 +140,30 @@ func cmd_move(x_token: String, y_token: String) -> Callable:
 		return null
 	
 func cmd_wait(time_token: String = "0") -> Callable:
-	return func():
+	return func() -> Variant:
 		var time := float(resolve_value(time_token))
 		#print("waiting...")
 		return get_tree().create_timer(time).timeout
 		
 func cmd_pause(time_token: String = "0.016") -> Callable:
-	return func():
+	return func() -> Variant:
 		#print("waiting...")
 		get_tree().paused = true
 		var time := float(resolve_value(time_token))
 		if time > 0:
 			var timer := get_tree().create_timer(time, true, false, false)
-			timer.timeout.connect(func(): get_tree().paused = false)
+			timer.timeout.connect(func() -> void: get_tree().paused = false)
 			return timer.timeout
 		printerr("cmd_pause: Pause time is zero. Exclude time param or set to > 0")
 		return null
 		
 func cmd_unpause() -> Callable:
-	return func():
+	return func() -> Variant:
 		get_tree().paused = false
 		return null
 		
 func cmd_goto(label: String) -> Callable:
-	return func():
+	return func() -> Variant:
 		if verbose:
 			print("Jumping to: ", label)
 		index = scratch_pad[label]
@@ -172,10 +175,10 @@ func cmd_goto(label: String) -> Callable:
 		#return null
 		
 func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
-	return func():
+	return func() -> Variant:
 		var anim_target: AnimatedSprite2D
 		if target is AnimatedSprite2D:
-			anim_target = target
+			anim_target = target as AnimatedSprite2D
 		elif node_path != "":
 			if not scratch_pad.has("anim_target_" + node_path):
 				anim_target = target.get_node_or_null(node_path) as AnimatedSprite2D
@@ -198,19 +201,19 @@ func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 		return null
 		
 func find_animated_sprite(node: Node) -> AnimatedSprite2D:
-	for child in node.get_children():
+	for child: Node in node.get_children():
 		if child is AnimatedSprite2D:
-			return child
+			return child as AnimatedSprite2D
 		var result := find_animated_sprite(child)
 		if result:
 			return result
 	return null
 		
 func cmd_call(on: String, method: String, args_tokens: Array) -> Callable:
-	return func():
+	return func() -> Variant:
 		var target_node: Object = resolve_target(on)
 		var resolved_args: Array = []
-		for token in args_tokens:
+		for token: Variant in args_tokens:
 			if token is String:
 				resolved_args.append(to_number(resolve_value(token)))
 			else:
@@ -231,14 +234,15 @@ func cmd_wait_signal(on: String, signal_name: String) -> Callable:
 		return null
 		
 func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
-	return func():
+	return func() -> Variant:
 		if expr != "":
 			scratch_pad[var_name] = evaluate_expr(expr)
 		else:
 			scratch_pad[var_name] = resolve_value(value) if value is String else value
+		return null
 			
 func cmd_goto_if(label: String, var_token: String, op: String, value_token: String) -> Callable:
-	return func():
+	return func() -> Variant:
 		var a: float = NAN
 		if scratch_pad.has(var_token):
 			a = float(scratch_pad.get(var_token, 0))
@@ -276,15 +280,16 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 				printerr("cmd_goto_if: unknown operator: ", op)
 		if result:
 			index = scratch_pad[label]
+		return null
 	
 func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Callable:
-	return func():
+	return func() -> Variant:
 		var pos := Vector2(float(resolve_value(x_token)), float(resolve_value(y_token)))
 		var tween := create_tween()
 		tween.tween_property(target, "global_position", pos, float(resolve_value(dur_token)))
 		return tween.finished
 		
-func run_sequence(commands: Array) -> void:
+func run_sequence(commands: Array[Callable]) -> void:
 	if running:
 		return
 	running = true
@@ -296,7 +301,7 @@ func run_sequence(commands: Array) -> void:
 		#print("running command: ", index, " : ", current)
 		
 		if current.is_valid():
-			var result = current.call()
+			var result: Variant = current.call()
 			if result is Signal:
 				await result
 		else:
@@ -310,7 +315,7 @@ func parse_xml(path: String) -> Array[Dictionary]:
 		if trigger_cache.has(path):
 			trigger_config = trigger_cache[path]
 		return xml_cache[path]
-	var parser = XMLParser.new()
+	var parser := XMLParser.new()
 	var result: Array[Dictionary] = []
 	var valid := parser.open(path)
 	if valid != OK:
@@ -323,7 +328,7 @@ func parse_xml(path: String) -> Array[Dictionary]:
 			
 			if node_name == "trigger":
 				trigger_config = {}
-				for arg in range(parser.get_attribute_count()):
+				for arg: int in range(parser.get_attribute_count()):
 					trigger_config[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
 				trigger_cache[path] = trigger_config
 				continue
@@ -333,7 +338,7 @@ func parse_xml(path: String) -> Array[Dictionary]:
 				continue
 			if found_sequence:
 				var arguments: Dictionary = {}
-				for arg in range(parser.get_attribute_count()):
+				for arg: int in range(parser.get_attribute_count()):
 					arguments[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
 				
 				result.append({
@@ -487,7 +492,7 @@ func resolve_property_path(path: String) -> Variant:
 		printerr("resolve_property: can't locate object: ", parts[0])
 		return 0
 	var current: Variant = obj
-	for i in range(1, parts.size()):
+	for i: int in range(1, parts.size()):
 		var prop: String = parts[i]
 		if current is Object && prop in current:
 			current = current.get(prop)
@@ -518,12 +523,12 @@ func resolve_property_path(path: String) -> Variant:
 	
 #Factories
 
-func factory_move(args: Dictionary, index: int) -> Callable:
+func factory_move(args: Dictionary, _index: int) -> Callable:
 	var x := str(args.get("x", "0"))
 	var y := str(args.get("y", "0"))
 	return cmd_move(x, y)
 	
-func factory_wait(args: Dictionary, index: int) -> Callable:
+func factory_wait(args: Dictionary, _index: int) -> Callable:
 	var seconds := str(args.get("seconds", "0"))
 	return cmd_wait(seconds)
 	
@@ -531,50 +536,50 @@ func factory_wait(args: Dictionary, index: int) -> Callable:
 	#var label_name: String = args.get("name", "")
 	#return cmd_label(label_name, index)
 	
-func factory_goto(args: Dictionary, index: int) -> Callable:
-	var target: String = args.get("label", "")
-	return cmd_goto(target)
+func factory_goto(args: Dictionary, _index: int) -> Callable:
+	var label: String = args.get("label", "")
+	return cmd_goto(label)
 
-func factory_play_anim(args: Dictionary, index: int) -> Callable:
+func factory_play_anim(args: Dictionary, _index: int) -> Callable:
 	var anim: String = args.get("anim", "")
 	var node_path: String = args.get("node_path", "")
 	return cmd_play_anim(anim, node_path)
 	
-func factory_call(args: Dictionary, index: int) -> Callable:
+func factory_call(args: Dictionary, _index: int) -> Callable:
 	var method: String = args.get("method", "")
 	var on: String = args.get("on", "target")
 	var call_args: Array = []
 	
-	var args_index := 0
+	var args_index: int = 0
 	while args.has("arg%d" % args_index):
 		call_args.append(args["arg%d" % args_index])
 		args_index += 1
 	return cmd_call(on, method, call_args)
 	
-func factory_pause(args: Dictionary, index: int) -> Callable:
+func factory_pause(args: Dictionary, _index: int) -> Callable:
 	var time := str(args.get("time", ""))
 	return cmd_pause(time)
 	
-func factory_unpause(agrs: Dictionary, index: int) -> Callable:
+func factory_unpause(_args: Dictionary, _index: int) -> Callable:
 	return cmd_unpause()
 
-func factory_set(args: Dictionary, index: int) -> Callable:
+func factory_set(args: Dictionary, _index: int) -> Callable:
 	var var_name: String = args.get("var", "")
 	var value: Variant = args.get("value", "0")
 	var expr: String = args.get("expr", "")
 	return cmd_set(var_name, value, expr)
 	
-func factory_goto_if(args: Dictionary, index: int) -> Callable:
+func factory_goto_if(args: Dictionary, _index: int) -> Callable:
 	var lable: String = args.get("label", "")
 	var var_name: String = args.get("var", "")
 	var op: String = args.get("op", "0")
 	var value: String = args.get("value", "0")
 	return cmd_goto_if(lable, var_name, op, value)
 
-func factory_wait_signal(args: Dictionary, index: int) -> Callable:
+func factory_wait_signal(args: Dictionary, _index: int) -> Callable:
 	var on: String = args.get("on", "target")
 	var signal_name: String = args.get("signal", "")
 	return cmd_wait_signal(on, signal_name)
 
-func factory_tween_move(args: Dictionary, index: int) -> Callable:
+func factory_tween_move(args: Dictionary, _index: int) -> Callable:
 	return cmd_tween_move(str(args.get("x", 0)), str(args.get("y", 0)), str(args.get("duration", 0)))
