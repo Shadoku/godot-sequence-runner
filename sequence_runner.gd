@@ -372,10 +372,8 @@ func setup_trigger() -> void:
 			add_child(timer)
 			timer.timeout.connect(_on_trigger_timer.bind(timer))
 			timer.start()
-		"auto":
+		"auto", "manual":
 			run_sequence(sequence)
-		"manual":
-			pass
 				
 func _on_trigger_signal(body: Node = null) -> void:
 	var filter_group: String = trigger_config.get("filter_group", "")
