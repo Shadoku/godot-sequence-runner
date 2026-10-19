@@ -114,7 +114,6 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 	_compile_section = section
 	_compile_problems = PackedStringArray()
 	sequence = compile_sequence(commands)
-	scratch_pad.merge(labels, true)
 	if trigger_config.size() > 0:
 		setup_trigger()
 	else:
@@ -438,46 +437,60 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		write_property_path(root, prop, value)
 		return null
 
+## Jumps to `label` when `var_token` compared by `op` with `value_token` holds.
+## Each operand is a scratch-pad variable's name or a token, typed by
+## to_value(). When either is a string that does not read as a number, `eq`
+## and `!=` compare the two as strings and the other operators are an error;
+## otherwise both compare as numbers (a bool as 0 or 1). An operand that cannot
+## be resolved is an error, and nothing jumps.
 func cmd_goto_if(label: String, var_token: String, op: String, value_token: String) -> Callable:
 	return func() -> Variant:
-		var a: float = NAN
-		if scratch_pad.has(var_token):
-			a = to_float(scratch_pad.get(var_token, 0))
-		else:
-			a = to_float(resolve_value(var_token))
-		if is_nan(a):
+		var a: Variant = goto_if_operand(var_token)
+		if a == null:
 			run_error("goto_if: cannot resolve the first operand: " + var_token)
 			return null
-		var b: float = NAN
-		if scratch_pad.has(value_token):
-			b = to_float(scratch_pad.get(value_token))
-		else:
-			b = to_float(resolve_value(value_token))
-		if is_nan(b):
+		var b: Variant = goto_if_operand(value_token)
+		if b == null:
 			run_error("goto_if: cannot resolve the second operand: " + value_token)
 			return null
-		#var b := float(value)
 		var result := false
-		match op:
-			"eq":
-				result = a == b
-			"!=":
-				result = a != b
-			"<":
-				result = a < b
-			">":
-				result = a > b
-			"<=":
-				result = a <= b
-			">=":
-				result = a >= b
-			"mod":
-				result = !fmod(a, b)
-			_:
-				run_error("goto_if: unknown operator: " + op)
+		if a is String or b is String:
+			match op:
+				"eq":
+					result = str(a) == str(b)
+				"!=":
+					result = str(a) != str(b)
+				_:
+					run_error("goto_if: \"%s\" compares numbers, not the strings %s and %s" % [op, var_token, value_token])
+					return null
+		else:
+			var x := to_float(a)
+			var y := to_float(b)
+			match op:
+				"eq":
+					result = x == y
+				"!=":
+					result = x != y
+				"<":
+					result = x < y
+				">":
+					result = x > y
+				"<=":
+					result = x <= y
+				">=":
+					result = x >= y
+				"mod":
+					result = !fmod(x, y)
+				_:
+					run_error("goto_if: unknown operator: " + op)
 		if result:
 			jump(label)
 		return null
+
+## A goto_if operand's value: the scratch-pad variable named `token`, else the
+## token resolved; typed by to_value().
+func goto_if_operand(token: String) -> Variant:
+	return to_value(scratch_pad[token] if scratch_pad.has(token) else resolve_value(token))
 	
 func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Callable:
 	return func() -> Variant:

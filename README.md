@@ -28,7 +28,7 @@ sequence_runner.attach($Enemy, "res://data/sequences/attack.xml", true, {"damage
 <call on="target" method="take_damage" arg0="$damage" />
 ```
 
-Labels are merged after the variables, so a variable named like a label is replaced by the label.
+Labels live apart from the variables (`labels`), so a variable may share a label's name.
 
 **Listen for completion:**
 
@@ -232,6 +232,15 @@ Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`).
 ```xml
 <goto_if label="done" var="$counter" op=">=" value="5" />
 ```
+
+Each operand (`var` and `value`) is a scratch-pad variable's name or any token (`$name`, a path, a literal), typed as in [Typed Values](#typed-values). Two numbers (or bools, as 0 and 1) compare as numbers. When either operand is a string that does not read as a number, `eq` and `!=` compare the two as strings, and the other operators are an error (nothing jumps):
+
+```xml
+<goto_if label="burn" var="$element" op="eq" value="fire" />
+<goto_if label="skip" var="$body.tag" op="!=" value="'7'" />   <!-- quoted: compared with the string "7" -->
+```
+
+An operand that cannot be resolved is an error, and nothing jumps.
 
 ### Calling Methods
 
