@@ -246,7 +246,12 @@ func find_animated_sprite(node: Node) -> AnimatedSprite2D:
 			return result
 	return null
 		
-func cmd_call(on: String, method: String, args_tokens: Array) -> Callable:
+## Calls `method` on what `on` names with the resolved arguments. `var_name`
+## (when not empty) stores the return value in the scratch pad. `awaited` makes
+## the command async when the method returns a Signal (the sequence waits for
+## it) or is a coroutine (it waits for the method to finish, and `var_name` gets
+## its final return value); any other return value goes on at once.
+func cmd_call(on: String, method: String, args_tokens: Array, var_name: String = "", awaited: bool = false) -> Callable:
 	return func() -> Variant:
 		var target_node: Object = resolve_target(on)
 		var resolved_args: Array = []
@@ -255,11 +260,28 @@ func cmd_call(on: String, method: String, args_tokens: Array) -> Callable:
 				resolved_args.append(to_number(resolve_value(token)))
 			else:
 				resolved_args.append(token)
-		if target_node and target_node.has_method(method):
-			target_node.callv(method, resolved_args)
-		else:
-			printerr("cmd_call: cannot locate object and/or method: ", on, ":", method)
+		if target_node == null or not target_node.has_method(method):
+			printerr("sequence_runner: call: cannot locate object and/or method: ", on, ":", method)
+			return null
+		var result: Variant = target_node.callv(method, resolved_args)
+		var coroutine := is_coroutine(result)
+		if var_name != "":
+			scratch_pad[var_name] = null if coroutine else result
+		if not awaited:
+			return null
+		if result is Signal:
+			return result
+		if coroutine:
+			var state: Object = result
+			if var_name != "":
+				state.connect("completed", func(value: Variant) -> void: scratch_pad[var_name] = value, CONNECT_ONE_SHOT)
+			return Signal(state, "completed")
 		return null
+
+## Whether `value` is what calling a method that awaits returns before it ends
+## (a GDScriptFunctionState, whose `completed` signal carries the return value).
+static func is_coroutine(value: Variant) -> bool:
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and (value as Object).get_class() == "GDScriptFunctionState"
 		
 ## Waits for `signal_name` on the object `on` names (resolved like call's `on`).
 func cmd_wait_signal(on: String, signal_name: String) -> Callable:
@@ -740,7 +762,9 @@ func factory_call(args: Dictionary, _index: int) -> Callable:
 	while args.has("arg%d" % args_index):
 		call_args.append(args["arg%d" % args_index])
 		args_index += 1
-	return cmd_call(on, method, call_args)
+	var var_name: String = args.get("var", "")
+	var awaited: bool = str(args.get("await", "false")).to_lower() == "true"
+	return cmd_call(on, method, call_args, var_name, awaited)
 	
 func factory_pause(args: Dictionary, _index: int) -> Callable:
 	var time := str(args.get("time", ""))

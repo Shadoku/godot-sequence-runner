@@ -106,7 +106,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `set` | `var`, `value`, `expr` | Set a scratch pad variable |
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
-| `call` | `on`, `method`, `arg0`…`argN` | Call a method on a target object |
+| `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on a target object; `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
 | `pause` | `time` | Pause the scene tree (optionally for a duration) |
 | `unpause` | — | Unpause the scene tree |
 
@@ -211,6 +211,28 @@ Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`)
 <call on="target" method="take_damage" arg0="$damage" />
 <call on="Game/UI/HUD" method="show_message" arg0="Hello!" />
 ```
+
+**Return values.** `var="name"` stores what the method returns in the scratch pad, for later commands to read as `$name`:
+
+```xml
+<call on="world" method="spawn" arg0="12" var="blob" />
+<call on="blob" method="set_velocity" arg0="0" arg1="-200" />
+```
+
+**Waiting for a call.** `await="true"` makes `call` wait, depending on what the method gives back:
+
+| The method | `await="true"` |
+|---|---|
+| returns a `Signal` | waits for that signal |
+| awaits something itself (a coroutine: calling it hands back its state, a `GDScriptFunctionState`, until it returns) | waits until the method returns; `var` then gets its final return value |
+| returns anything else | goes on at once (the method has already finished) |
+
+```xml
+<call on="target" method="play_intro" await="true" />          <!-- func play_intro() -> void: await ...; ... -->
+<call on="dialog" method="ask" arg0="Continue?" await="true" var="answer" />
+```
+
+Without `await`, a coroutine runs on by itself while the sequence goes on, and `var` holds `null` (the method has not returned yet).
 
 ### Waiting for Signals
 
