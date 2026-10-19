@@ -28,8 +28,24 @@ var labels: Dictionary = {}
 var running: bool = false
 var index: int = 0
 var scratch_pad: Dictionary = {}
+## Command name -> its factory, `factory(args: Dictionary, index: int) -> Callable`.
+## Filled by register_command(); a factory put here directly (the older way)
+## still works, its attributes unchecked.
 var command_factories: Dictionary = {}
+## Command name -> the attributes it accepts (register_command()).
+var command_attributes: Dictionary = {}
+## How many problems the last compile found (an unknown command or attribute, a
+## goto to a missing label...), start()'s or validate()'s.
+var compile_errors: int = 0
 var trigger_config: Dictionary = {}
+
+var _commands_registered: bool = false
+# While validate() runs: compile problems are collected, not pushed.
+var _quiet: bool = false
+# The file and section being compiled, and the problems found, for compile_error().
+var _compile_path: String = ""
+var _compile_section: String = ""
+var _compile_problems: PackedStringArray = PackedStringArray()
 
 signal sequence_finished
 
@@ -37,7 +53,8 @@ signal sequence_finished
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	register_commands()
+	if not _commands_registered:
+		register_commands()
 	if target == null:
 		if verbose:
 			print("Targeting parent")
@@ -59,14 +76,16 @@ func _ready() -> void:
 ## such section (or cannot be read): nothing runs and sequence_finished is not
 ## emitted.
 func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
+	if not _commands_registered:
+		register_commands()
 	xml_path = path if path != "" else xml_path
 	if xml_path == "":
-		printerr("sequence_runner: no xml path set")
+		push_error("sequence_runner: no xml path set")
 		return false
 	var parsed := parse_xml(xml_path)
 	if not parsed.has(section):
-		if not parsed.is_empty():
-			printerr("sequence_runner: %s has no section \"%s\"" % [xml_path, section])
+		if xml_cache.has(xml_path):
+			push_error("sequence_runner: %s has no section \"%s\"" % [xml_path, section])
 		return false
 	index = 0
 	current_section = section
@@ -77,6 +96,9 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 	if not label_cache.has(xml_path):
 		label_cache[xml_path] = {}
 	label_cache[xml_path][section] = labels
+	_compile_path = xml_path
+	_compile_section = section
+	_compile_problems = PackedStringArray()
 	sequence = compile_sequence(commands)
 	scratch_pad.merge(labels, true)
 	if trigger_config.size() > 0:
@@ -105,22 +127,85 @@ static func sections(path: String) -> PackedStringArray:
 static func has_section(path: String, section_name: String) -> bool:
 	return read_sections(path).has(section_name)
 	
+## Registers the built-in commands (start() and validate() call it when _ready()
+## has not run yet). A subclass adds its own after `super.register_commands()`.
 func register_commands() -> void:
-	command_factories = {
-		"move": factory_move,
-		"wait": factory_wait,
-		#"label": factory_label,
-		"goto": factory_goto,
-		"play_anim": factory_play_anim,
-		"call": factory_call,
-		"pause": factory_pause,
-		"unpause": factory_unpause,
-		"set": factory_set,
-		"goto_if": factory_goto_if,
-		"tween_move": factory_tween_move,
-		"wait_signal": factory_wait_signal,
-		"set_prop": factory_set_prop
-	}
+	command_factories = {}
+	command_attributes = {}
+	_commands_registered = true
+	register_command("move", factory_move, PackedStringArray(["x", "y"]))
+	register_command("wait", factory_wait, PackedStringArray(["seconds"]))
+	register_command("goto", factory_goto, PackedStringArray(["label"]))
+	register_command("play_anim", factory_play_anim, PackedStringArray(["anim", "node_path"]))
+	register_command("call", factory_call, PackedStringArray(["on", "method", "var", "await", "arg*"]))
+	register_command("pause", factory_pause, PackedStringArray(["time"]))
+	register_command("unpause", factory_unpause, PackedStringArray())
+	register_command("set", factory_set, PackedStringArray(["var", "value", "expr"]))
+	register_command("goto_if", factory_goto_if, PackedStringArray(["label", "var", "op", "value"]))
+	register_command("tween_move", factory_tween_move, PackedStringArray(["x", "y", "duration"]))
+	register_command("wait_signal", factory_wait_signal, PackedStringArray(["on", "signal"]))
+	register_command("set_prop", factory_set_prop, PackedStringArray(["on", "prop", "value", "expr"]))
+
+## Registers the command `cmd_name`: `factory(args: Dictionary, index: int) ->
+## Callable` builds it from an element's attributes, and `attributes` are the
+## ones it accepts (an entry ending in `*` stands for that prefix followed by
+## digits: call's `arg*` takes arg0, arg1...). Any other attribute is a compile
+## problem.
+func register_command(cmd_name: String, factory: Callable, attributes: PackedStringArray) -> void:
+	command_factories[cmd_name] = factory
+	command_attributes[cmd_name] = attributes
+
+## Whether `attribute` is one of `accepted` (register_command()'s list).
+static func accepts_attribute(accepted: PackedStringArray, attribute: String) -> bool:
+	if accepted.has(attribute):
+		return true
+	for entry: String in accepted:
+		if entry.ends_with("*"):
+			var rest := attribute.trim_prefix(entry.trim_suffix("*"))
+			if attribute.begins_with(entry.trim_suffix("*")) and rest != "" and rest.lstrip("0123456789") == "":
+				return true
+	return false
+
+## Compiles every section of the file at `path` without running anything or
+## pushing an error, and returns one line per problem: `<file>:<section>:
+## <problem>` (an unknown command, an unknown attribute of a known command, a
+## goto or goto_if to a label the section lacks, what a factory reported) and
+## `<file>: <problem>` for the file itself (it cannot be read, it has no
+## section, two sections share a name). Empty when the file is sound. The
+## runner's own commands count (a subclass's included), registered first when
+## _ready() has not run, so a runner outside the tree can validate.
+func validate(path: String) -> PackedStringArray:
+	if not _commands_registered:
+		register_commands()
+	var problems := PackedStringArray()
+	var parsed := read_sections(path, true)
+	if not xml_cache.has(path):
+		problems.append("%s: cannot be read" % path)
+		compile_errors = problems.size()
+		return problems
+	for problem: String in problem_cache.get(path, PackedStringArray()):
+		problems.append("%s: %s" % [path, problem])
+	var was_quiet := _quiet
+	_quiet = true
+	for section_name: String in parsed:
+		_compile_path = path
+		_compile_section = section_name
+		_compile_problems = PackedStringArray()
+		compile_sequence(parsed[section_name])
+		problems.append_array(_compile_problems)
+	_quiet = was_quiet
+	compile_errors = problems.size()
+	return problems
+
+## Reports a problem found while compiling (a factory calls it for a bad
+## attribute value): counted in compile_errors, and pushed as an error unless
+## validate() is collecting them.
+func compile_error(message: String) -> void:
+	compile_errors += 1
+	var line := "%s:%s: %s" % [_compile_path, _compile_section, message]
+	_compile_problems.append(line)
+	if not _quiet:
+		push_error("sequence_runner: " + line)
 
 
 #func make_sequence() -> Array[Callable]:
@@ -143,21 +228,47 @@ static func label_map(parsed: Array[Dictionary]) -> Dictionary:
 			result[cmd["args"].get("name", "")] = i
 	return result
 
+## Compiles a section's commands into callables, each through its registered
+## factory (a label is a no-op, so indices match the commands'). Its problems
+## (an unknown command or attribute, a goto or goto_if to a label the section
+## lacks) go through compile_error() and are counted in compile_errors; an
+## unknown command compiles to a no-op.
 func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
+	compile_errors = 0
+	var section_labels := label_map(parsed)
 	var result : Array[Callable] = []
 
 	for cmd: Dictionary in parsed:
 		var cmd_name: String = cmd.get("name", "")
+		var args: Dictionary = cmd.get("args", {})
 		if cmd_name == "label":
+			check_attributes(cmd_name, args, PackedStringArray(["name"]))
 			result.append(func() -> Variant: return null)
 			continue
-		var args: Dictionary = cmd.get("args", {})
-		if command_factories.has(cmd_name):
-			result.append(command_factories[cmd_name].call(args, result.size()))
-		else:
-			printerr("Unknown command: ", cmd_name)
+		if not command_factories.has(cmd_name):
+			compile_error("unknown command <%s>" % cmd_name)
 			result.append(func() -> Variant: return null)
+			continue
+		if command_attributes.has(cmd_name):
+			check_attributes(cmd_name, args, command_attributes[cmd_name])
+		if (cmd_name == "goto" or cmd_name == "goto_if") and not section_labels.has(str(args.get("label", ""))):
+			compile_error("<%s> to a label the section lacks: \"%s\"" % [cmd_name, args.get("label", "")])
+		var factory: Callable = command_factories[cmd_name]
+		result.append(factory.call(args, result.size()))
 	return result
+
+## Reports a problem met while running (an unresolvable reference, a missing
+## object, method, signal or key, a bad operand...) as an error naming the file
+## and section. The sequence goes on.
+func run_error(message: String) -> void:
+	push_error("sequence_runner: %s:%s: %s" % [xml_path, current_section, message])
+
+## Reports, through compile_error(), each attribute of `args` that `accepted`
+## (register_command()'s list for `cmd_name`) does not hold.
+func check_attributes(cmd_name: String, args: Dictionary, accepted: PackedStringArray) -> void:
+	for attribute: String in args:
+		if not accepts_attribute(accepted, attribute):
+			compile_error("<%s> has no attribute \"%s\"" % [cmd_name, attribute])
 		
 	
 func cmd_move(x_token: String, y_token: String) -> Callable:
@@ -184,7 +295,7 @@ func cmd_pause(time_token: String = "0.016") -> Callable:
 			var timer := get_tree().create_timer(time, true, false, false)
 			timer.timeout.connect(func() -> void: get_tree().paused = false)
 			return timer.timeout
-		printerr("cmd_pause: Pause time is zero. Exclude time param or set to > 0")
+		run_error("pause: the pause time is zero (leave time out or set it above 0)")
 		return null
 		
 func cmd_unpause() -> Callable:
@@ -204,7 +315,7 @@ func jump(label: String) -> void:
 	if labels.has(label):
 		index = labels[label]
 	else:
-		printerr("sequence_runner: no label \"%s\" in section \"%s\" of %s" % [label, current_section, xml_path])
+		run_error("no label \"%s\" in the section" % label)
 		
 #func cmd_label(label: String, index: int) -> Callable:
 	#scratch_pad[label] = index
@@ -231,7 +342,7 @@ func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 		if anim_target:
 			anim_target.play(anim)
 		else:
-			printerr("cmd_play_anim: No Animatable nodes found")
+			run_error("play_anim: no AnimatedSprite2D found")
 		#anim_target.play(anim)
 		
 		#print("Playing anim: ", anim)
@@ -261,7 +372,7 @@ func cmd_call(on: String, method: String, args_tokens: Array, var_name: String =
 			else:
 				resolved_args.append(token)
 		if target_node == null or not target_node.has_method(method):
-			printerr("sequence_runner: call: cannot locate object and/or method: ", on, ":", method)
+			run_error("call: cannot locate object and/or method: %s:%s" % [on, method])
 			return null
 		var result: Variant = target_node.callv(method, resolved_args)
 		var coroutine := is_coroutine(result)
@@ -289,7 +400,7 @@ func cmd_wait_signal(on: String, signal_name: String) -> Callable:
 		var source: Object = resolve_target(on)
 		if source and source.has_signal(signal_name):
 			return Signal(source, signal_name)
-		printerr("cmd_wait_signal: cannot locate object and/or signal: ", on, ":", signal_name)
+		run_error("wait_signal: cannot locate object and/or signal: %s:%s" % [on, signal_name])
 		return null
 		
 func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
@@ -307,7 +418,7 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 	return func() -> Variant:
 		var root: Variant = path_root(on)
 		if root == null:
-			printerr("sequence_runner: set_prop: cannot locate object: ", on)
+			run_error("set_prop: cannot locate object: " + on)
 			return null
 		var value: Variant = evaluate_expr(expr) if expr != "" else to_number(resolve_value(value_token))
 		write_property_path(root, prop, value)
@@ -321,7 +432,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 		else:
 			a = to_float(resolve_value(var_token))
 		if is_nan(a):
-			printerr("cmd_goto_if: Cannot resolve first operand: ", var_token)
+			run_error("goto_if: cannot resolve the first operand: " + var_token)
 			return null
 		var b: float = NAN
 		if scratch_pad.has(value_token):
@@ -329,7 +440,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 		else:
 			b = to_float(resolve_value(value_token))
 		if is_nan(b):
-			printerr("cmd_goto_if: Cannot resolve second operand: ", value_token)
+			run_error("goto_if: cannot resolve the second operand: " + value_token)
 			return null
 		#var b := float(value)
 		var result := false
@@ -349,7 +460,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 			"mod":
 				result = !fmod(a, b)
 			_:
-				printerr("cmd_goto_if: unknown operator: ", op)
+				run_error("goto_if: unknown operator: " + op)
 		if result:
 			jump(label)
 		return null
@@ -377,7 +488,7 @@ func run_sequence(commands: Array[Callable]) -> void:
 			if result is Signal:
 				await result
 		else:
-			printerr("Invalid sequence command: ", index - 1)
+			run_error("invalid command at %d" % (index - 1))
 	
 	running = false
 	sequence_finished.emit()
@@ -399,10 +510,10 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 		return xml_cache[path]
 	var parser := XMLParser.new()
 	var result: Dictionary = {}
-	var valid := parser.open(path)
+	var valid := parser.open(path) if FileAccess.file_exists(path) else ERR_FILE_NOT_FOUND
 	if valid != OK:
 		if not quiet:
-			printerr("sequence_runner: could not open XML file for command parsing: ", path)
+			push_error("sequence_runner: could not open XML file for command parsing: ", path)
 		return result
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
@@ -439,11 +550,13 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 		elif parser.get_node_type() == XMLParser.NODE_ELEMENT_END:
 			if parser.get_node_name() == "sequence":
 				found_sequence = false
+	if result.is_empty():
+		problems.append("no section (no <sequence> element)")
 	xml_cache[path] = result
 	problem_cache[path] = problems
 	if not quiet:
 		for problem: String in problems:
-			printerr("sequence_runner: %s: %s" % [path, problem])
+			push_error("sequence_runner: %s: %s" % [path, problem])
 	return result
 				
 				 
@@ -458,7 +571,7 @@ func setup_trigger() -> void:
 			if source_node && source_node.has_signal(signal_name):
 				source_node. connect(signal_name, _on_trigger_signal)
 			else:
-				printerr("setup_trigger: couln't locate source/signal")
+				run_error("trigger: cannot locate the source and/or its signal")
 		"timer":
 			var seconds := float(trigger_config.get("seconds", "1.0"))
 			var timer := Timer.new()
@@ -506,12 +619,12 @@ func evaluate_expr(expr: String) -> Variant:
 				if right != 0:
 					return left / right
 				else:
-					printerr("evaluate_expr: attempt to divide by zero")
+					run_error("expression divides by zero: " + expr)
 					return 0
 			_:
-				printerr("evaluate_expr: unknown operator: ", operator)
+				run_error("expression has an unknown operator: " + operator)
 			
-	printerr("evaluate_expr: malformed expression: ", expr)
+	run_error("malformed expression: " + expr)
 	return 0
 			
 	
@@ -531,7 +644,7 @@ func resolve_target(path: String) -> Object:
 		var named: Variant = scratch_pad[key]
 		if is_instance_valid(named):
 			return named
-		printerr("sequence_runner: $%s was freed" % key)
+		run_error("$%s was freed" % key)
 		return null
 	if scratch_pad.has("target_" + key):
 		return scratch_pad["target_" + key]
@@ -568,7 +681,7 @@ func resolve_random(token: String) -> float:
 	var opperands := token.trim_prefix("random(").trim_suffix(")")
 	var parts := opperands.split(",")
 	if parts.size() != 2:
-		printerr("resolve_random: Expected 'random(min,max),' got: ", token)
+		run_error("expected random(min, max), got: " + token)
 		return 0.0
 	var min_val := to_float(resolve_value(parts[0].strip_edges()))
 	var max_val := to_float(resolve_value(parts[1].strip_edges()))
@@ -578,7 +691,7 @@ func resolve_random_int(token: String) -> int:
 	var opperands := token.trim_prefix("random_int(").trim_suffix(")")
 	var parts := opperands.split(",")
 	if parts.size() != 2:
-		printerr("resolve_random_int: Expected 'random_int(min,max),' got: ", token)
+		run_error("expected random_int(min, max), got: " + token)
 		return 0
 	var min_val := int(to_float(resolve_value(parts[0].strip_edges())))
 	var max_val := int(to_float(resolve_value(parts[1].strip_edges())))
@@ -595,7 +708,7 @@ static func to_float(value: Variant) -> float:
 			return str(value).to_float()
 		TYPE_NIL:
 			return 0.0
-	printerr("sequence_runner: not a number: ", value)
+	push_error("sequence_runner: not a number: ", value)
 	return 0.0
 
 ## The value at `path` (`body.radius`, `target.global_position.x`,
@@ -608,12 +721,12 @@ func resolve_property_path(path: String) -> Variant:
 	var parts := path.split(".")
 	var current: Variant = path_root(parts[0])
 	if current == null:
-		printerr("sequence_runner: unresolvable reference: $", path)
+		run_error("unresolvable reference: $" + path)
 		return null
 	for i: int in range(1, parts.size()):
 		var step := read_member(current, parts[i])
 		if not step[0]:
-			printerr("sequence_runner: $%s: %s has no \"%s\"" % [path, type_string(typeof(current)), parts[i]])
+			run_error("$%s: %s has no \"%s\"" % [path, type_string(typeof(current)), parts[i]])
 			return null
 		current = step[1]
 	return current
@@ -669,7 +782,7 @@ static func read_member(container: Variant, key: String) -> Array:
 func write_property_path(root: Variant, prop: String, value: Variant) -> bool:
 	var written := write_path(root, prop.split("."), 0, value)
 	if not written[0]:
-		printerr("sequence_runner: cannot write \"%s\" on %s" % [prop, type_string(typeof(root))])
+		run_error("cannot write \"%s\" on %s" % [prop, type_string(typeof(root))])
 	return written[0]
 
 ## write_property_path()'s step: writes `value` at parts[at...] of `container`;

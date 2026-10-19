@@ -342,23 +342,27 @@ Add a command in three steps:
 ```gdscript
 func cmd_scale(x_token: String, y_token: String) -> Callable:
     return func() -> Variant:
-        var x := float(resolve_value(x_token))
-        var y := float(resolve_value(y_token))
+        var x := to_float(resolve_value(x_token))
+        var y := to_float(resolve_value(y_token))
         target.scale = Vector2(x, y)
         return null
 ```
 
-**2. Factory function** — maps XML attributes to command arguments (the second argument is the command's index in the compiled sequence):
+A problem met while it runs (a value it cannot use, an object that is gone) goes through `run_error(message)`, which pushes an error naming the file and section.
+
+**2. Factory function** — maps XML attributes to command arguments (the second argument is the command's index in the compiled sequence). A bad attribute *value* it can see at compile time goes through `compile_error(message)`, so `validate()` lists it too:
 
 ```gdscript
 func factory_scale(args: Dictionary, _index: int) -> Callable:
+    if not args.has("x"):
+        compile_error("<scale> needs x")
     return cmd_scale(str(args.get("x", "1")), str(args.get("y", "1")))
 ```
 
-**3. Register** in `register_commands()`:
+**3. Register** in `register_commands()`, with the attributes it accepts (any other is a compile problem; an entry ending in `*` stands for that prefix followed by digits, as `call`'s `arg*`):
 
 ```gdscript
-command_factories["scale"] = factory_scale
+register_command("scale", factory_scale, PackedStringArray(["x", "y"]))
 ```
 
 Then use it: `<scale x="2" y="2" />`
@@ -371,7 +375,37 @@ extends sequence_runner
 
 func register_commands() -> void:
     super.register_commands()
-    command_factories["scale"] = factory_scale
+    register_command("scale", factory_scale, PackedStringArray(["x", "y"]))
+```
+
+A factory put straight into `command_factories` (`command_factories["scale"] = factory_scale`, the older way) still works; its attributes are then not checked.
+
+## Errors and Validation
+
+Every problem is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
+
+**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
+
+**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, a malformed expression.
+
+**Checking files without running them.** `validate(path) -> PackedStringArray` compiles every section of a file and returns one line per problem, without running anything and without pushing an error:
+
+```
+res://data/sequences/peg.xml: a second section "on_hit" (ignored)
+res://data/sequences/peg.xml:: unknown command <cal>
+res://data/sequences/peg.xml:on_hit: <set> has no attribute "valu"
+res://data/sequences/peg.xml:on_hit: <goto> to a label the section lacks: "done"
+res://data/sequences/old.xml: no section (no <sequence> element)
+res://data/sequences/gone.xml: cannot be read
+```
+
+(`<file>:<section>: <problem>`, the section empty for the unnamed one; `<file>: <problem>` for the file itself.) An empty array means the file is sound. It is an instance method so that a subclass's commands count, and it registers the commands itself, so a runner that is not in the tree can check every file of a project, in a test:
+
+```gdscript
+var runner := MySequenceRunner.new()
+for file in DirAccess.get_files_at("res://data/sequences/"):
+    assert(runner.validate("res://data/sequences/" + file).is_empty())
+runner.free()
 ```
 
 ## Architecture
