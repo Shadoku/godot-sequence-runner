@@ -142,6 +142,19 @@ Variable tokens can reference object properties with dot notation. `Vector2` and
 <call on="target" method="take_damage" arg0="$body.radius" />
 ```
 
+Paths step into a `Dictionary` by key, whether it is an object's property or a scratch-pad variable itself:
+
+```gdscript
+runner.start("res://data/sequences/peg.xml", {"piece": peg, "stats": {"bonus": 2}})   # peg.props == {"health": 3}
+```
+
+```xml
+<goto_if label="broken" var="$piece.props.health" op="<=" value="0" />
+<call on="target" method="add_score" arg0="$stats.bonus" />
+```
+
+A segment that cannot be read (a missing dictionary key, a property the object lacks) is an error and the reference reads as `null`; numeric commands (`move`, `wait`, expressions...) read `null` as `0`. Writing through a path is [`set_prop`](#writing-properties)'s job, and creates a missing key.
+
 ### Named Objects
 
 Objects handed in with `start(path, vars)` can be addressed by name wherever an object is expected: `on` in `call` and `wait_signal`, and the head of a property path. `on` (and a path's head) resolves, in order, to:

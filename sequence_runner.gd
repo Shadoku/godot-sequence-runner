@@ -162,15 +162,15 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 func cmd_move(x_token: String, y_token: String) -> Callable:
 	return func() -> Variant:
 		if target:
-			var x := float(resolve_value(x_token))
-			var y := float(resolve_value(y_token))
+			var x := to_float(resolve_value(x_token))
+			var y := to_float(resolve_value(y_token))
 			target.global_position = Vector2(x, y)
 			#target.global_position = position
 		return null
 	
 func cmd_wait(time_token: String = "0") -> Callable:
 	return func() -> Variant:
-		var time := float(resolve_value(time_token))
+		var time := to_float(resolve_value(time_token))
 		#print("waiting...")
 		return get_tree().create_timer(time).timeout
 		
@@ -178,7 +178,7 @@ func cmd_pause(time_token: String = "0.016") -> Callable:
 	return func() -> Variant:
 		#print("waiting...")
 		get_tree().paused = true
-		var time := float(resolve_value(time_token))
+		var time := to_float(resolve_value(time_token))
 		if time > 0:
 			var timer := get_tree().create_timer(time, true, false, false)
 			timer.timeout.connect(func() -> void: get_tree().paused = false)
@@ -281,17 +281,17 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 	return func() -> Variant:
 		var a: float = NAN
 		if scratch_pad.has(var_token):
-			a = float(scratch_pad.get(var_token, 0))
+			a = to_float(scratch_pad.get(var_token, 0))
 		else:
-			a = float(resolve_value(var_token))
+			a = to_float(resolve_value(var_token))
 		if is_nan(a):
 			printerr("cmd_goto_if: Cannot resolve first operand: ", var_token)
 			return null
 		var b: float = NAN
 		if scratch_pad.has(value_token):
-			b = float(scratch_pad.get(value_token))
+			b = to_float(scratch_pad.get(value_token))
 		else:
-			b = float(resolve_value(value_token))
+			b = to_float(resolve_value(value_token))
 		if is_nan(b):
 			printerr("cmd_goto_if: Cannot resolve second operand: ", value_token)
 			return null
@@ -320,9 +320,9 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 	
 func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Callable:
 	return func() -> Variant:
-		var pos := Vector2(float(resolve_value(x_token)), float(resolve_value(y_token)))
+		var pos := Vector2(to_float(resolve_value(x_token)), to_float(resolve_value(y_token)))
 		var tween := create_tween()
-		tween.tween_property(target, "global_position", pos, float(resolve_value(dur_token)))
+		tween.tween_property(target, "global_position", pos, to_float(resolve_value(dur_token)))
 		return tween.finished
 		
 func run_sequence(commands: Array[Callable]) -> void:
@@ -456,9 +456,9 @@ func evaluate_expr(expr: String) -> Variant:
 	if tokens.size() == 1:
 		return resolve_value(tokens[0])
 	if tokens.size() == 3:
-		var left := float(resolve_value(tokens[0]))
+		var left := to_float(resolve_value(tokens[0]))
 		var operator := str(tokens[1])
-		var right := float(resolve_value(tokens[2]))
+		var right := to_float(resolve_value(tokens[2]))
 		match operator:
 			"+":
 				return left + right
@@ -534,8 +534,8 @@ func resolve_random(token: String) -> float:
 	if parts.size() != 2:
 		printerr("resolve_random: Expected 'random(min,max),' got: ", token)
 		return 0.0
-	var min_val := float(resolve_value(parts[0].strip_edges()))
-	var max_val := float(resolve_value(parts[1].strip_edges()))
+	var min_val := to_float(resolve_value(parts[0].strip_edges()))
+	var max_val := to_float(resolve_value(parts[1].strip_edges()))
 	return randf_range(min_val, max_val)
 	
 func resolve_random_int(token: String) -> int:
@@ -544,49 +544,85 @@ func resolve_random_int(token: String) -> int:
 	if parts.size() != 2:
 		printerr("resolve_random_int: Expected 'random_int(min,max),' got: ", token)
 		return 0
-	var min_val := int(resolve_value(parts[0].strip_edges()))
-	var max_val := int(resolve_value(parts[1].strip_edges()))
+	var min_val := int(to_float(resolve_value(parts[0].strip_edges())))
+	var max_val := int(to_float(resolve_value(parts[1].strip_edges())))
 	return randi_range(min_val, max_val)
 	
-## The value at `path` (`body.radius`, `target.global_position.x`): its head
-## resolved like call's `on` (resolve_target()), then a property per segment, or
-## a Vector2 / Vector3 component. A path of one segment is the object itself
-## (`$target`, `$self`).
+## A value as a float for the commands that take numbers: a number or a bool as
+## it is, a String by its leading number (0 when it has none), null (a reference
+## that could not be resolved, already reported) as 0.
+func to_float(value: Variant) -> float:
+	match typeof(value):
+		TYPE_INT, TYPE_FLOAT, TYPE_BOOL:
+			return float(value)
+		TYPE_STRING, TYPE_STRING_NAME:
+			return str(value).to_float()
+		TYPE_NIL:
+			return 0.0
+	printerr("sequence_runner: not a number: ", value)
+	return 0.0
+
+## The value at `path` (`body.radius`, `target.global_position.x`,
+## `piece.props.health`): its head found by path_root(), then per segment an
+## Object's property, a Dictionary's key or a Vector2 / Vector3 component
+## (read_member()). A path of one segment is the head itself (`$target`).
+## Null, with an error, when the head or a segment cannot be found (a missing
+## dictionary key is one).
 func resolve_property_path(path: String) -> Variant:
 	var parts := path.split(".")
-	var obj := resolve_target(parts[0])
-	if obj == null:
+	var current: Variant = path_root(parts[0])
+	if current == null:
 		printerr("sequence_runner: unresolvable reference: $", path)
-		return 0
-	var current: Variant = obj
+		return null
 	for i: int in range(1, parts.size()):
-		var prop: String = parts[i]
-		if current is Object && prop in current:
-			current = current.get(prop)
-		elif current is Vector2:
-			match prop:
-				"x":
-					current = current.x
-				"y":
-					current = current.y
-				_:
-					printerr("resolve_property_path: invalid Vector2 propewrty: ", prop)
-					return 0
-		elif current is Vector3:
-			match prop:
-				"x":
-					current = current.x
-				"y":
-					current = current.y
-				"z":
-					current = current.z
-				_:
-					printerr("resolve_property_path: invalid Vector3 propewrty: ", prop)
-					return 0
-		else:
-			printerr("resolve_property_path: Cannot access property ", prop, " on: ", current, " of type: ", typeof(current))
-			return 0
+		var step := read_member(current, parts[i])
+		if not step[0]:
+			printerr("sequence_runner: $%s: %s has no \"%s\"" % [path, type_string(typeof(current)), parts[i]])
+			return null
+		current = step[1]
 	return current
+
+## Where a property path starts: `target` and `self`, then a scratch-pad
+## variable of that name (an Object, a Dictionary, a Vector2... whatever it
+## holds; a `$` prefix is accepted), then the node at /root/<head>
+## (resolve_target()). Null when none is found.
+func path_root(head: String) -> Variant:
+	var key := head.trim_prefix("$")
+	if key != "target" and key != "self" and scratch_pad.has(key) and typeof(scratch_pad[key]) != TYPE_OBJECT:
+		return scratch_pad[key]
+	return resolve_target(key)
+
+## Reads the member `key` of `container`: an Object's property, a Dictionary's
+## key (a String key, or its StringName), a Vector2's or Vector3's component.
+## [true, the value], or [false, null] when the container has no such member.
+static func read_member(container: Variant, key: String) -> Array:
+	match typeof(container):
+		TYPE_OBJECT:
+			if is_instance_valid(container) and key in container:
+				return [true, (container as Object).get(key)]
+		TYPE_DICTIONARY:
+			var dict: Dictionary = container
+			if dict.has(key):
+				return [true, dict[key]]
+			if dict.has(StringName(key)):
+				return [true, dict[StringName(key)]]
+		TYPE_VECTOR2:
+			var v2: Vector2 = container
+			match key:
+				"x":
+					return [true, v2.x]
+				"y":
+					return [true, v2.y]
+		TYPE_VECTOR3:
+			var v3: Vector3 = container
+			match key:
+				"x":
+					return [true, v3.x]
+				"y":
+					return [true, v3.y]
+				"z":
+					return [true, v3.z]
+	return [false, null]
 	
 #Factories
 
