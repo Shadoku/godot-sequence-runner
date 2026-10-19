@@ -118,7 +118,8 @@ func register_commands() -> void:
 		"set": factory_set,
 		"goto_if": factory_goto_if,
 		"tween_move": factory_tween_move,
-		"wait_signal": factory_wait_signal
+		"wait_signal": factory_wait_signal,
+		"set_prop": factory_set_prop
 	}
 
 
@@ -277,6 +278,19 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 			scratch_pad[var_name] = resolve_value(value) if value is String else value
 		return null
 			
+## Writes at the path `prop` of what `on` names (an object as call's `on`
+## resolves it, or a scratch-pad dictionary; path_root()): `value` resolved as a
+## token, or `expr` evaluated as set's.
+func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -> Callable:
+	return func() -> Variant:
+		var root: Variant = path_root(on)
+		if root == null:
+			printerr("sequence_runner: set_prop: cannot locate object: ", on)
+			return null
+		var value: Variant = evaluate_expr(expr) if expr != "" else to_number(resolve_value(value_token))
+		write_property_path(root, prop, value)
+		return null
+
 func cmd_goto_if(label: String, var_token: String, op: String, value_token: String) -> Callable:
 	return func() -> Variant:
 		var a: float = NAN
@@ -551,7 +565,7 @@ func resolve_random_int(token: String) -> int:
 ## A value as a float for the commands that take numbers: a number or a bool as
 ## it is, a String by its leading number (0 when it has none), null (a reference
 ## that could not be resolved, already reported) as 0.
-func to_float(value: Variant) -> float:
+static func to_float(value: Variant) -> float:
 	match typeof(value):
 		TYPE_INT, TYPE_FLOAT, TYPE_BOOL:
 			return float(value)
@@ -623,6 +637,75 @@ static func read_member(container: Variant, key: String) -> Array:
 				"z":
 					return [true, v3.z]
 	return [false, null]
+
+## Writes `value` at the path `prop` (`gravity_scale`, `props.health`,
+## `position.x`) from `root` (an Object or a Dictionary). Every segment but the
+## last is read (read_member()); the last is an Object's property, a
+## Dictionary's key (created when missing) or a Vector2 / Vector3 component, and
+## a value read on the way (a vector) is written back into its parent. False,
+## with an error, when a segment cannot be read or written.
+func write_property_path(root: Variant, prop: String, value: Variant) -> bool:
+	var written := write_path(root, prop.split("."), 0, value)
+	if not written[0]:
+		printerr("sequence_runner: cannot write \"%s\" on %s" % [prop, type_string(typeof(root))])
+	return written[0]
+
+## write_property_path()'s step: writes `value` at parts[at...] of `container`;
+## [true, the container as written] or [false, container].
+static func write_path(container: Variant, parts: PackedStringArray, at: int, value: Variant) -> Array:
+	var key := parts[at]
+	if at == parts.size() - 1:
+		return write_member(container, key, value)
+	var step := read_member(container, key)
+	if not step[0]:
+		return [false, container]
+	var child: Variant = step[1]
+	var written := write_path(child, parts, at + 1, value)
+	if not written[0]:
+		return written
+	match typeof(child):
+		TYPE_OBJECT, TYPE_DICTIONARY, TYPE_ARRAY:
+			return [true, container]
+	return write_member(container, key, written[1])
+
+## Writes the member `key` of `container` (as read_member() reads it; a
+## Dictionary's missing key is created). [true, the container as written] or
+## [false, container] when it has no such member.
+static func write_member(container: Variant, key: String, value: Variant) -> Array:
+	match typeof(container):
+		TYPE_OBJECT:
+			if is_instance_valid(container) and key in container:
+				(container as Object).set(key, value)
+				return [true, container]
+		TYPE_DICTIONARY:
+			var dict: Dictionary = container
+			if not dict.has(key) and dict.has(StringName(key)):
+				dict[StringName(key)] = value
+			else:
+				dict[key] = value
+			return [true, dict]
+		TYPE_VECTOR2:
+			var v2: Vector2 = container
+			match key:
+				"x":
+					v2.x = to_float(value)
+					return [true, v2]
+				"y":
+					v2.y = to_float(value)
+					return [true, v2]
+		TYPE_VECTOR3:
+			var v3: Vector3 = container
+			match key:
+				"x":
+					v3.x = to_float(value)
+					return [true, v3]
+				"y":
+					v3.y = to_float(value)
+					return [true, v3]
+				"z":
+					v3.z = to_float(value)
+					return [true, v3]
+	return [false, container]
 	
 #Factories
 
@@ -683,6 +766,9 @@ func factory_wait_signal(args: Dictionary, _index: int) -> Callable:
 	var on: String = args.get("on", "target")
 	var signal_name: String = args.get("signal", "")
 	return cmd_wait_signal(on, signal_name)
+
+func factory_set_prop(args: Dictionary, _index: int) -> Callable:
+	return cmd_set_prop(str(args.get("on", "target")), str(args.get("prop", "")), str(args.get("value", "")), str(args.get("expr", "")))
 
 func factory_tween_move(args: Dictionary, _index: int) -> Callable:
 	return cmd_tween_move(str(args.get("x", 0)), str(args.get("y", 0)), str(args.get("duration", 0)))

@@ -104,6 +104,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
 | `set` | `var`, `value`, `expr` | Set a scratch pad variable |
+| `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN` | Call a method on a target object |
 | `pause` | `time` | Pause the scene tree (optionally for a duration) |
@@ -174,6 +175,19 @@ runner.start("res://data/sequences/bounce.xml", {"body": body, "peg": peg})
 ```
 
 A scratch-pad object that has been freed is an error (the command finds no object). Scratch-pad objects are looked up each time, not cached, so `set` can point a name at another object mid-sequence.
+
+### Writing Properties
+
+`set_prop` writes at the path `prop` of the object `on` names (resolved like `call`'s, or a scratch-pad dictionary), with `value` (a token, resolved like `set`'s) or `expr` (an expression, as `set`'s). The path's last segment is an object's property, a dictionary key (created when missing) or a `Vector2` / `Vector3` component (the vector is read, changed and written back, so `position.x` moves the node):
+
+```xml
+<set_prop on="world" prop="gravity_scale" value="0.5" />
+<set_prop on="piece" prop="props.health" expr="$piece.props.health - 1" />
+<set_prop prop="position.x" value="120" />
+<set_prop on="stats" prop="combo" value="0" />
+```
+
+An object it cannot find, or a segment it cannot read or write, is an error and nothing is written.
 
 ### Conditional Jumps
 
