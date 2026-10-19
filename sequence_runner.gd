@@ -37,6 +37,9 @@ var command_attributes: Dictionary = {}
 ## How many problems the last compile found (an unknown command or attribute, a
 ## goto to a missing label...), start()'s or validate()'s.
 var compile_errors: int = 0
+## The generator random() and random_int() draw from; null: the global one.
+## A seeded generator makes the sequence's randomness reproducible.
+var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
 
 var _commands_registered: bool = false
@@ -685,7 +688,7 @@ func resolve_random(token: String) -> float:
 		return 0.0
 	var min_val := to_float(resolve_value(parts[0].strip_edges()))
 	var max_val := to_float(resolve_value(parts[1].strip_edges()))
-	return randf_range(min_val, max_val)
+	return rng.randf_range(min_val, max_val) if rng != null else randf_range(min_val, max_val)
 	
 func resolve_random_int(token: String) -> int:
 	var opperands := token.trim_prefix("random_int(").trim_suffix(")")
@@ -695,7 +698,7 @@ func resolve_random_int(token: String) -> int:
 		return 0
 	var min_val := int(to_float(resolve_value(parts[0].strip_edges())))
 	var max_val := int(to_float(resolve_value(parts[1].strip_edges())))
-	return randi_range(min_val, max_val)
+	return rng.randi_range(min_val, max_val) if rng != null else randi_range(min_val, max_val)
 	
 ## A value as a float for the commands that take numbers: a number or a bool as
 ## it is, a String by its leading number (0 when it has none), null (a reference

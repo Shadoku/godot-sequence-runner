@@ -134,6 +134,15 @@ Any token field accepts `random(min, max)` for a random float or `random_int(min
 <set var="roll" value="random_int(1, 6)" />
 ```
 
+They draw from the global generator unless the runner's `rng` is set: give it a seeded `RandomNumberGenerator` (a game's run seed, say) and the sequence rolls the same values every time it is played from the same state, without disturbing the global generator.
+
+```gdscript
+var dice := RandomNumberGenerator.new()
+dice.seed = run_seed
+runner.rng = dice
+runner.start("res://data/sequences/scatter.xml")
+```
+
 ### Property Paths
 
 Variable tokens can reference object properties with dot notation. `Vector2` and `Vector3` components (`.x`, `.y`, `.z`) are supported. The path's head is resolved like `call`'s `on` (see [Named Objects](#named-objects)), so it can start from an object handed in with `start()`; a path of one segment is the object itself (`$target`, `$self`):
