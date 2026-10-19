@@ -42,7 +42,15 @@ var compile_errors: int = 0
 var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
 
+## Whether the last sequence was cut by stop() rather than played to its end.
+var stopped: bool = false
+
 var _commands_registered: bool = false
+# Bumped by every run_sequence() and stop(): a command's signal from an older
+# run does not resume the loop.
+var _run_id: int = 0
+# The tween the playing tween_move runs, killed by stop().
+var _tween: Tween = null
 # While validate() runs: compile problems are collected, not pushed.
 var _quiet: bool = false
 # The file and section being compiled, and the problems found, for compile_error().
@@ -51,6 +59,8 @@ var _compile_section: String = ""
 var _compile_problems: PackedStringArray = PackedStringArray()
 
 signal sequence_finished
+# What the loop waits on while an async command plays (run_sequence()).
+signal _resumed
 
 
 # Called when the node enters the scene tree for the first time.
@@ -91,6 +101,7 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 			push_error("sequence_runner: %s has no section \"%s\"" % [xml_path, section])
 		return false
 	index = 0
+	stopped = false
 	current_section = section
 	scratch_pad = {}
 	scratch_pad.merge(vars)
@@ -473,28 +484,77 @@ func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Call
 		var pos := Vector2(to_float(resolve_value(x_token)), to_float(resolve_value(y_token)))
 		var tween := create_tween()
 		tween.tween_property(target, "global_position", pos, to_float(resolve_value(dur_token)))
+		_tween = tween
 		return tween.finished
+
+## Ends the running sequence: no further command runs (one waiting is
+## abandoned, a tween_move's tween killed), `running` turns false, `stopped`
+## true, and sequence_finished is emitted at once, as at the end, so a host
+## waiting on it never hangs. Does nothing when no sequence is running.
+func stop() -> void:
+	if not running:
+		return
+	running = false
+	stopped = true
+	_run_id += 1
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	_tween = null
+	_resumed.emit()
+	sequence_finished.emit()
 		
+## Plays `commands` from `index` as one coroutine: an instant command (it
+## returns null) goes straight on, an async one (it returns a Signal) is waited
+## for. The loop waits on the runner's own `_resumed`, which the command's
+## signal triggers for this run only, so stop() can end a waiting run at once
+## and a signal left over from a stopped run never resumes a later one.
 func run_sequence(commands: Array[Callable]) -> void:
 	if running:
 		return
 	running = true
 	sequence = commands
-	
+	_run_id += 1
+	var run_id := _run_id
+
 	while running && index < sequence.size():
 		var current: Callable = sequence[index]
 		index = index + 1
 		#print("running command: ", index, " : ", current)
-		
+
 		if current.is_valid():
 			var result: Variant = current.call()
+			if run_id != _run_id:
+				return
 			if result is Signal:
-				await result
+				var awaited: Signal = result
+				var resume := _on_command_done.bind(run_id)
+				var arity := signal_arity(awaited)
+				awaited.connect(resume.unbind(arity) if arity > 0 else resume, CONNECT_ONE_SHOT)
+				await _resumed
+				if run_id != _run_id:
+					return
 		else:
 			run_error("invalid command at %d" % (index - 1))
-	
+
 	running = false
+	_tween = null
 	sequence_finished.emit()
+
+# An async command's signal fired: resumes the loop if its run still plays.
+func _on_command_done(run_id: int) -> void:
+	if run_id == _run_id:
+		_resumed.emit()
+
+## How many arguments `sig` passes (as declared), so the loop can listen to any
+## signal.
+static func signal_arity(sig: Signal) -> int:
+	var source := sig.get_object()
+	if source == null:
+		return 0
+	for info: Dictionary in source.get_signal_list():
+		if info["name"] == sig.get_name():
+			return (info["args"] as Array).size()
+	return 0
 	
 ## The sections of the file at `path` (read_sections()) and its <trigger> as
 ## trigger_config.
