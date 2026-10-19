@@ -371,7 +371,7 @@ func cmd_call(on: String, method: String, args_tokens: Array, var_name: String =
 		var resolved_args: Array = []
 		for token: Variant in args_tokens:
 			if token is String:
-				resolved_args.append(to_number(resolve_value(token)))
+				resolved_args.append(to_value(resolve_value(token)))
 			else:
 				resolved_args.append(token)
 		if target_node == null or not target_node.has_method(method):
@@ -411,7 +411,7 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 		if expr != "":
 			scratch_pad[var_name] = evaluate_expr(expr)
 		else:
-			scratch_pad[var_name] = resolve_value(value) if value is String else value
+			scratch_pad[var_name] = to_value(resolve_value(value)) if value is String else value
 		return null
 			
 ## Writes at the path `prop` of what `on` names (an object as call's `on`
@@ -423,7 +423,7 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		if root == null:
 			run_error("set_prop: cannot locate object: " + on)
 			return null
-		var value: Variant = evaluate_expr(expr) if expr != "" else to_number(resolve_value(value_token))
+		var value: Variant = evaluate_expr(expr) if expr != "" else to_value(resolve_value(value_token))
 		write_property_path(root, prop, value)
 		return null
 
@@ -669,11 +669,21 @@ func resolve_value(token: String) -> Variant:
 		return scratch_pad[ref]
 	return resolve_property_path(ref)
 	
-## A String that reads as an int or a float becomes that number, so a call's
-## arguments reach typed parameters; any other value is returned as it is.
-func to_number(value: Variant) -> Variant:
+## A token's value typed, for call's arguments and set's and set_prop's values:
+## a String `true` or `false` (any case) becomes that bool; one wrapped in
+## single quotes (`'7'`) is the string inside, whatever it reads as; one that
+## reads as an int or a float becomes that number (so methods with typed
+## parameters can be called); any other value is returned as it is.
+static func to_value(value: Variant) -> Variant:
 	if value is String:
 		var text: String = value
+		if text.length() >= 2 and text.begins_with("'") and text.ends_with("'"):
+			return text.substr(1, text.length() - 2)
+		var lower := text.to_lower()
+		if lower == "true":
+			return true
+		if lower == "false":
+			return false
 		if text.is_valid_int():
 			return text.to_int()
 		if text.is_valid_float():

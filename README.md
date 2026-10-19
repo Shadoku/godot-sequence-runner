@@ -122,7 +122,24 @@ Set variables with `set` and reference them anywhere with the `$` prefix:
 
 Expressions support basic arithmetic: `$a + 1`, `$speed * 2`, `$hp - 25`, `$total / 4`.
 
-`set`'s `value` is resolved like any other token (`$other`, `random(...)`, `random_int(...)`); `expr` evaluates arithmetic. Variables can also be seeded from code with `start(path, vars)` (see Getting Started).
+`set`'s `value` is resolved like any other token (`$other`, `random(...)`, `random_int(...)`), then typed (below); `expr` evaluates arithmetic. Variables can also be seeded from code with `start(path, vars)` (see Getting Started).
+
+### Typed Values
+
+A token's resolved value is typed before `call` passes it as an argument and before `set` or `set_prop` stores it (`to_value()`):
+
+| Token | Value |
+|---|---|
+| `true`, `false` (any case: `True`, `FALSE`) | that `bool` |
+| `6`, `-2`, `0.5` | the `int` or `float` it reads as |
+| `'7'`, `'true'` (wrapped in single quotes) | the `String` inside, whatever it reads as |
+| anything else (`hello`) | the `String` as it is |
+
+```xml
+<call on="target" method="set_visible" arg0="false" />
+<call on="target" method="say" arg0="'42'" />       <!-- the string "42", not the int -->
+<set var="armed" value="true" />
+```
 
 ### Random Values
 
@@ -212,7 +229,7 @@ Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`).
 
 `call` targets `"target"` (parent) by default. Use `"self"` for the runner, the name of an object handed in with `start()` (see [Named Objects](#named-objects)), or a path from `/root/`. Targets resolved from `/root/` are cached for the duration of the run.
 
-Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`), then a string that reads as a number becomes one: `"6"` is passed as the int `6`, `"0.5"` as the float `0.5`, so methods with typed parameters (`func take_damage(n: int)`) can be called. Any other string is passed as it is.
+Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`), then typed (see [Typed Values](#typed-values)): `"6"` is passed as the int `6`, `"0.5"` as the float `0.5`, `"true"` as the bool `true`, so methods with typed parameters (`func take_damage(n: int)`) can be called; `'6'` in single quotes is passed as the string `"6"`. Any other string is passed as it is.
 
 ```xml
 <call method="queue_free" />
