@@ -16,11 +16,11 @@ var runner := sequence_runner.attach($Enemy, "res://data/sequences/intro.xml")
 runner.start()
 ```
 
-**Pass variables in:** `start(path := "", vars := {})` runs the sequence at `path` (or `xml_path` when `path` is empty). The scratch pad is reset on every `start()`, then `vars` are merged into it, so the sequence reads them as `$name`:
+**Pass variables in:** `start(path := "", vars := {}, section := "") -> bool` runs a section of the file at `path` (or `xml_path` when `path` is empty; `section` is the unnamed `<sequence>` when empty, see [Sections](#sections)). The scratch pad is reset on every `start()`, then `vars` are merged into it, so the sequence reads them as `$name`:
 
 ```gdscript
 runner.start("res://data/sequences/attack.xml", {"damage": 12})
-# or when attaching: attach(node, xml, auto := false, vars := {}) hands vars to start() when auto is true
+# or when attaching: attach(node, xml, auto := false, vars := {}, section := "") hands vars and section to start() when auto is true
 sequence_runner.attach($Enemy, "res://data/sequences/attack.xml", true, {"damage": 12})
 ```
 
@@ -62,6 +62,35 @@ runner.sequence_finished.connect(_on_sequence_done)
   </sequence>
 </data>
 ```
+
+### Sections
+
+A file can hold any number of named sections, `<sequence name="...">`, beside at most one unnamed `<sequence>`: one file per actor, one section per moment the game plays it at. `start(path, vars, section)` runs one section (`""`, the default, is the unnamed one, so a file with a single unnamed `<sequence>` behaves as it always did). Labels belong to their section: two sections may use the same label names.
+
+```xml
+<data>
+  <sequence name="on_hit">
+    <call on="target" method="flash" />
+  </sequence>
+  <sequence name="on_removed">
+    <play_anim anim="break" />
+    <wait seconds="0.3" />
+  </sequence>
+</data>
+```
+
+```gdscript
+runner.start("res://data/sequences/peg.xml", {}, "on_hit")
+if not runner.start("res://data/sequences/peg.xml", {}, "on_spin"):
+    pass  # the file has no section "on_spin": an error, nothing runs, sequence_finished is not emitted
+```
+
+A section the file lacks makes `start()` return `false` with an error; nothing runs and `sequence_finished` is not emitted. Two sections of the same name are an error (the second is ignored). To ask a file what it holds without running it:
+
+| Static function | Returns |
+|---|---|
+| `sequence_runner.sections(path)` | the file's section names in file order (`""` for its unnamed `<sequence>`); empty, with an error, for a file that cannot be read |
+| `sequence_runner.has_section(path, name)` | whether the file has that section |
 
 ## Commands
 
@@ -277,4 +306,4 @@ func register_commands() -> void:
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned during compilation and stored separately from the command array as index pointers. Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Resolved targets (from `call`) are also cached in the scratch pad to avoid repeated lookups.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Resolved targets (from `call`) are also cached in the scratch pad to avoid repeated lookups.

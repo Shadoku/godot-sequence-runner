@@ -1,8 +1,12 @@
 class_name sequence_runner
 extends Node
+## Parsed files: path -> {section name -> its commands}, the unnamed section under "".
 static var xml_cache: Dictionary = {}
 static var trigger_cache: Dictionary = {}
+## Label maps: path -> {section name -> {label -> command index}}.
 static var label_cache: Dictionary = {}
+## What reading a file found wrong (a duplicate section...): path -> its problems.
+static var problem_cache: Dictionary = {}
 
 #Reusable sequence runner. Attach to node, set xml_path, then call start()
 
@@ -17,6 +21,10 @@ static var label_cache: Dictionary = {}
 
 var target: Node = null
 var sequence: Array[Callable] = []
+## The section of xml_path the runner plays ("": the unnamed one).
+var current_section: String = ""
+## The playing section's labels: name -> command index.
+var labels: Dictionary = {}
 var running: bool = false
 var index: int = 0
 var scratch_pad: Dictionary = {}
@@ -45,37 +53,57 @@ func _ready() -> void:
 	#run_sequence(sequence)
 	#pass # Replace with function body.
 	
-## Runs the sequence at `path` (or xml_path). `vars` seeds the scratch pad after
-## its reset, so the sequence can read them as `$name`.
-func start(path: String = "", vars: Dictionary = {}) -> void:
+## Runs the section `section` ("": the unnamed <sequence>) of the file at `path`
+## (or xml_path). `vars` seeds the scratch pad after its reset, so the sequence
+## can read them as `$name`. Returns false, with an error, when the file has no
+## such section (or cannot be read): nothing runs and sequence_finished is not
+## emitted.
+func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
 	xml_path = path if path != "" else xml_path
 	if xml_path == "":
 		printerr("sequence_runner: no xml path set")
-		return
+		return false
+	var parsed := parse_xml(xml_path)
+	if not parsed.has(section):
+		if not parsed.is_empty():
+			printerr("sequence_runner: %s has no section \"%s\"" % [xml_path, section])
+		return false
 	index = 0
+	current_section = section
 	scratch_pad = {}
 	scratch_pad.merge(vars)
-	var parsed := parse_xml(xml_path)
-	sequence = compile_sequence(parsed)
-	if label_cache.has(xml_path):
-		scratch_pad.merge(label_cache[xml_path], true)
-	if not sequence:
-		printerr("No compiled sequence found")
-		return
+	var commands: Array[Dictionary] = parsed[section]
+	labels = label_map(commands)
+	if not label_cache.has(xml_path):
+		label_cache[xml_path] = {}
+	label_cache[xml_path][section] = labels
+	sequence = compile_sequence(commands)
+	scratch_pad.merge(labels, true)
 	if trigger_config.size() > 0:
 		setup_trigger()
 	else:
 		run_sequence(sequence)
+	return true
 		
 #sequence_runner.attach($node, "res://data/sequences/whatever.xml")
-## `vars` seed the scratch pad when `auto` starts the runner here.
-static func attach(node: Node, xml: String, auto: bool = false, vars: Dictionary = {}) -> sequence_runner:
+## `vars` seed the scratch pad and `section` picks the section when `auto` starts
+## the runner here.
+static func attach(node: Node, xml: String, auto: bool = false, vars: Dictionary = {}, section: String = "") -> sequence_runner:
 	var runner := sequence_runner.new()
 	runner.xml_path = xml
 	node.add_child(runner)
 	if auto:
-		runner.start("", vars)
+		runner.start("", vars, section)
 	return runner
+
+## The section names of the file at `path`, in file order ("" for its unnamed
+## <sequence>). Empty, with an error, for a file that cannot be read.
+static func sections(path: String) -> PackedStringArray:
+	return PackedStringArray(read_sections(path).keys())
+
+## Whether the file at `path` has the section `section_name` ("": the unnamed one).
+static func has_section(path: String, section_name: String) -> bool:
+	return read_sections(path).has(section_name)
 	
 func register_commands() -> void:
 	command_factories = {
@@ -105,17 +133,18 @@ func register_commands() -> void:
 	#
 	#return new_sequence
 	
-func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
-	var result : Array[Callable] = []
-	#store labels first:
-	var label_map: Dictionary = {}
+## A section's labels: label name -> the index of its (no-op) command.
+static func label_map(parsed: Array[Dictionary]) -> Dictionary:
+	var result: Dictionary = {}
 	for i: int in range(parsed.size()):
 		var cmd: Dictionary = parsed[i]
 		if cmd.get("name", "") == "label":
-			label_map[cmd["args"].get("name", "")] = i
-			
-	label_cache[xml_path] = label_map
-	
+			result[cmd["args"].get("name", "")] = i
+	return result
+
+func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
+	var result : Array[Callable] = []
+
 	for cmd: Dictionary in parsed:
 		var cmd_name: String = cmd.get("name", "")
 		if cmd_name == "label":
@@ -166,8 +195,15 @@ func cmd_goto(label: String) -> Callable:
 	return func() -> Variant:
 		if verbose:
 			print("Jumping to: ", label)
-		index = scratch_pad[label]
+		jump(label)
 		return null
+
+## Moves the playing section to its label `label` (an error when it has none).
+func jump(label: String) -> void:
+	if labels.has(label):
+		index = labels[label]
+	else:
+		printerr("sequence_runner: no label \"%s\" in section \"%s\" of %s" % [label, current_section, xml_path])
 		
 #func cmd_label(label: String, index: int) -> Callable:
 	#scratch_pad[label] = index
@@ -279,7 +315,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 			_:
 				printerr("cmd_goto_if: unknown operator: ", op)
 		if result:
-			index = scratch_pad[label]
+			jump(label)
 		return null
 	
 func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Callable:
@@ -310,38 +346,57 @@ func run_sequence(commands: Array[Callable]) -> void:
 	running = false
 	sequence_finished.emit()
 	
-func parse_xml(path: String) -> Array[Dictionary]:
+## The sections of the file at `path` (read_sections()) and its <trigger> as
+## trigger_config.
+func parse_xml(path: String) -> Dictionary:
+	var parsed := read_sections(path)
+	trigger_config = trigger_cache.get(path, {})
+	return parsed
+
+## Reads the file at `path` once (cached): section name -> its commands
+## ({"name": element, "args": {attribute: value}}), the unnamed <sequence> under
+## "", in file order; its <trigger> goes to trigger_cache. A second section of
+## the same name is dropped as a problem (problem_cache). Empty for a file that
+## cannot be read: an error unless `quiet`.
+static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	if xml_cache.has(path):
-		if trigger_cache.has(path):
-			trigger_config = trigger_cache[path]
 		return xml_cache[path]
 	var parser := XMLParser.new()
-	var result: Array[Dictionary] = []
+	var result: Dictionary = {}
 	var valid := parser.open(path)
 	if valid != OK:
-		printerr("Could not open XML file for command parsing: ", path)
+		if not quiet:
+			printerr("sequence_runner: could not open XML file for command parsing: ", path)
 		return result
+	var problems := PackedStringArray()
+	var commands: Array[Dictionary] = []
 	var found_sequence := false
 	while parser.read() == OK:
 		if parser.get_node_type() == XMLParser.NODE_ELEMENT:
 			var node_name := parser.get_node_name()
-			
+
 			if node_name == "trigger":
-				trigger_config = {}
+				var config: Dictionary = {}
 				for arg: int in range(parser.get_attribute_count()):
-					trigger_config[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
-				trigger_cache[path] = trigger_config
+					config[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
+				trigger_cache[path] = config
 				continue
-			
+
 			if node_name == "sequence":
-				found_sequence = true
+				var section_name := parser.get_named_attribute_value_safe("name")
+				commands = []
+				if result.has(section_name):
+					problems.append("a second section \"%s\" (ignored)" % section_name)
+				else:
+					result[section_name] = commands
+				found_sequence = not parser.is_empty()
 				continue
 			if found_sequence:
 				var arguments: Dictionary = {}
 				for arg: int in range(parser.get_attribute_count()):
 					arguments[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
-				
-				result.append({
+
+				commands.append({
 					"name": node_name,
 					"args": arguments
 					})
@@ -349,6 +404,10 @@ func parse_xml(path: String) -> Array[Dictionary]:
 			if parser.get_node_name() == "sequence":
 				found_sequence = false
 	xml_cache[path] = result
+	problem_cache[path] = problems
+	if not quiet:
+		for problem: String in problems:
+			printerr("sequence_runner: %s: %s" % [path, problem])
 	return result
 				
 				 
