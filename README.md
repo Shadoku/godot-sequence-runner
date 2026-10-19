@@ -135,11 +135,32 @@ Any token field accepts `random(min, max)` for a random float or `random_int(min
 
 ### Property Paths
 
-Variable tokens can reference object properties with dot notation. `Vector2` and `Vector3` components (`.x`, `.y`, `.z`) are supported:
+Variable tokens can reference object properties with dot notation. `Vector2` and `Vector3` components (`.x`, `.y`, `.z`) are supported. The path's head is resolved like `call`'s `on` (see [Named Objects](#named-objects)), so it can start from an object handed in with `start()`; a path of one segment is the object itself (`$target`, `$self`):
 
 ```xml
 <move x="$target.global_position.x" y="$target.global_position.y" />
+<call on="target" method="take_damage" arg0="$body.radius" />
 ```
+
+### Named Objects
+
+Objects handed in with `start(path, vars)` can be addressed by name wherever an object is expected: `on` in `call` and `wait_signal`, and the head of a property path. `on` (and a path's head) resolves, in order, to:
+
+1. `target` (the runner's parent, or the runner with `target_self`) and `self` (the runner);
+2. a scratch-pad variable of that name holding an `Object` (`on="body"` and `on="$body"` are the same);
+3. the node at that path from `/root/` (cached for the run).
+
+```gdscript
+runner.start("res://data/sequences/bounce.xml", {"body": body, "peg": peg})
+```
+
+```xml
+<call on="peg" method="flash" />
+<call on="body" method="apply_impulse" arg0="$peg.strength" />
+<wait_signal on="body" signal="settled" />
+```
+
+A scratch-pad object that has been freed is an error (the command finds no object). Scratch-pad objects are looked up each time, not cached, so `set` can point a name at another object mid-sequence.
 
 ### Conditional Jumps
 
@@ -153,7 +174,7 @@ Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`).
 
 ### Calling Methods
 
-`call` targets `"target"` (parent) by default. Use `"self"` for the runner, or a path from `/root/`. Resolved targets are cached for the duration of the run.
+`call` targets `"target"` (parent) by default. Use `"self"` for the runner, the name of an object handed in with `start()` (see [Named Objects](#named-objects)), or a path from `/root/`. Targets resolved from `/root/` are cached for the duration of the run.
 
 Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`), then a string that reads as a number becomes one: `"6"` is passed as the int `6`, `"0.5"` as the float `0.5`, so methods with typed parameters (`func take_damage(n: int)`) can be called. Any other string is passed as it is.
 
@@ -166,7 +187,7 @@ Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`)
 
 ### Waiting for Signals
 
-`wait_signal` pauses the sequence until an object emits a signal, so a sequence can wait for the game (a `call` followed by a `wait` cannot). `on` is resolved like `call`'s (`target` by default, `self`, or a path from `/root/`). If the object or the signal does not exist, it prints an error and the sequence carries on without waiting.
+`wait_signal` pauses the sequence until an object emits a signal, so a sequence can wait for the game (a `call` followed by a `wait` cannot). `on` is resolved like `call`'s (`target` by default, `self`, a named object, or a path from `/root/`). If the object or the signal does not exist, it prints an error and the sequence carries on without waiting.
 
 ```xml
 <call on="target" method="drop" />
@@ -306,4 +327,4 @@ func register_commands() -> void:
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Resolved targets (from `call`) are also cached in the scratch pad to avoid repeated lookups.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially. Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.

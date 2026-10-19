@@ -479,19 +479,29 @@ func evaluate_expr(expr: String) -> Variant:
 	return 0
 			
 	
+## The object `path` names (call's and wait_signal's `on`, the head of a
+## property path): `target`, `self`, then a scratch-pad entry of that name
+## holding an Object (a `$` prefix is accepted and stripped; an object handed in
+## with start()'s vars), then the node at `/root/<path>`, cached for the run as
+## `target_<path>` (scratch-pad objects are not cached). Null when none is found.
 func resolve_target(path: String) -> Object:
-	if scratch_pad.has("target_" + path):
-		return scratch_pad.get("target_" + path)
-	var result: Object
-	match path:
+	var key := path.trim_prefix("$")
+	match key:
 		"target":
-			result = target
-			
+			return target
 		"self":
-			result = self
-		_:
-			result = get_node_or_null("/root/" + path)
-	scratch_pad["target_" + path] = result
+			return self
+	if scratch_pad.has(key) and typeof(scratch_pad[key]) == TYPE_OBJECT:
+		var named: Variant = scratch_pad[key]
+		if is_instance_valid(named):
+			return named
+		printerr("sequence_runner: $%s was freed" % key)
+		return null
+	if scratch_pad.has("target_" + key):
+		return scratch_pad["target_" + key]
+	var result: Object = get_node_or_null("/root/" + key) if is_inside_tree() else null
+	if result != null:
+		scratch_pad["target_" + key] = result
 	return result
 	
 	
@@ -505,11 +515,7 @@ func resolve_value(token: String) -> Variant:
 	var ref := token.substr(1)
 	if scratch_pad.has(ref):
 		return scratch_pad[ref]
-	if "." in ref:
-		return resolve_property_path(ref)
-		
-	printerr("resolve_value: unresolvable reference: ", token)
-	return float(token)
+	return resolve_property_path(ref)
 	
 ## A String that reads as an int or a float becomes that number, so a call's
 ## arguments reach typed parameters; any other value is returned as it is.
@@ -542,11 +548,15 @@ func resolve_random_int(token: String) -> int:
 	var max_val := int(resolve_value(parts[1].strip_edges()))
 	return randi_range(min_val, max_val)
 	
+## The value at `path` (`body.radius`, `target.global_position.x`): its head
+## resolved like call's `on` (resolve_target()), then a property per segment, or
+## a Vector2 / Vector3 component. A path of one segment is the object itself
+## (`$target`, `$self`).
 func resolve_property_path(path: String) -> Variant:
 	var parts := path.split(".")
 	var obj := resolve_target(parts[0])
 	if obj == null:
-		printerr("resolve_property: can't locate object: ", parts[0])
+		printerr("sequence_runner: unresolvable reference: $", path)
 		return 0
 	var current: Variant = obj
 	for i: int in range(1, parts.size()):
