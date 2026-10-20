@@ -111,7 +111,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `label` | `name` | Define a named jump target |
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
-| `set` | `var`, `value`, `expr` | Set a scratch pad variable |
+| `set` | `var`, `value` or `expr` | Set a scratch pad variable to a token or an [expression](#expressions) |
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on a target object; `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
@@ -128,9 +128,28 @@ Set variables with `set` and reference them anywhere with the `$` prefix:
 <move x="$spawn_x" y="$spawn_y" />
 ```
 
-Expressions support basic arithmetic: `$a + 1`, `$speed * 2`, `$hp - 25`, `$total / 4`.
+`set`'s `value` is resolved like any other token (`$other`, `random(...)`, `random_int(...)`), then typed (below); `expr` evaluates an expression. Variables can also be seeded from code with `start(path, vars)` (see Getting Started).
 
-`set`'s `value` is resolved like any other token (`$other`, `random(...)`, `random_int(...)`), then typed (below); `expr` evaluates arithmetic. Variables can also be seeded from code with `start(path, vars)` (see Getting Started).
+### Expressions
+
+`set`'s and `set_prop`'s `expr` is a GDScript expression (Godot's `Expression` class): operators with their usual precedence, parentheses, comparisons, `and` / `or` / `not`, `a if c else b`, string literals in single quotes (`'fire'`, inside an XML attribute) and Godot's built-in functions and constructors (`abs`, `clamp`, `min`, `max`, `floor`, `round`, `sin`, `lerp`, `str`, `Vector2(...)`...):
+
+```xml
+<set var="x" expr="($left + $right) / 2" />
+<set var="speed" expr="clamp($speed * 1.5, 0, $max_speed)" />
+<set var="label" expr="'boss' if $hp > 100 else 'minion'" />
+<set var="hot" expr="$element == 'fire'" />
+<set var="roll" expr="random_int(1, 6) * 10 + random_int(1, 6)" />
+<set_prop on="piece" prop="props.health" expr="$piece.props.health - $piece.props.step" />
+```
+
+**References.** `$name` and `$path.to.value` read as any other token does (the scratch pad, [Named Objects](#named-objects), [Property Paths](#property-paths), with the same errors), and a segment followed by `(` is left to the expression, so `$body.get_class()` calls the method on the object the path reads. Each reference is bound as an input before the expression runs.
+
+**Numbers.** A reference that is an int, a bool or null reads as a float, as every other command reads its numbers (`$i + 1` is `2.0`, a flag adds as 1, an unresolvable reference, already reported, reads as 0); a string that reads as a number is one. Literals read as GDScript reads them: `$period / 2` is `0.5` when `period` is `1.0`, but `7 / 2` on two int literals is `3`. A string, a vector, an object, a dictionary or an array reads as it is (`$pos.length()`, `$name + '!'`).
+
+**Functions.** Besides Godot's, `random(min, max)` and `random_int(min, max)` draw from the runner's `rng` ([Random Values](#random-values)). An expression sees nothing else: a bare name is an error.
+
+**Errors.** An expression that does not parse is a compile problem (`validate()` lists it, `start()` pushes it) and the command does nothing. A failure while it runs (an unknown function, a member it cannot read, `'a' + 1`, a division by zero, a float that overflows) is an error and the expression reads as `0`; the sequence carries on. Expressions are compiled with their section and executed per run.
 
 ### Typed Values
 
@@ -157,6 +176,7 @@ Any token field accepts `random(min, max)` for a random float or `random_int(min
 <move x="random(0, 800)" y="random(0, 600)" />
 <wait seconds="random(0.5, 2.0)" />
 <set var="roll" value="random_int(1, 6)" />
+<set var="roll" expr="random_int(1, 6) * 10 + random_int(1, 6)" />   <!-- the function form, inside an expression -->
 ```
 
 They draw from the global generator unless the runner's `rng` is set: give it a seeded `RandomNumberGenerator` (a game's run seed, say) and the sequence rolls the same values every time it is played from the same state, without disturbing the global generator.
@@ -212,7 +232,7 @@ A scratch-pad object that has been freed is an error (the command finds no objec
 
 ### Writing Properties
 
-`set_prop` writes at the path `prop` of the object `on` names (resolved like `call`'s, or a scratch-pad dictionary), with `value` (a token, resolved like `set`'s) or `expr` (an expression, as `set`'s). The path's last segment is an object's property, a dictionary key (created when missing) or a `Vector2` / `Vector3` component (the vector is read, changed and written back, so `position.x` moves the node):
+`set_prop` writes at the path `prop` of the object `on` names (resolved like `call`'s, or a scratch-pad dictionary), with `value` (a token, resolved like `set`'s) or `expr` (an [expression](#expressions), as `set`'s). The path's last segment is an object's property, a dictionary key (created when missing) or a `Vector2` / `Vector3` component (the vector is read, changed and written back, so `position.x` moves the node):
 
 ```xml
 <set_prop on="world" prop="gravity_scale" value="0.5" />
@@ -427,9 +447,9 @@ A factory put straight into `command_factories` (`command_factories["scale"] = f
 
 Every problem is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
 
-**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
+**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, an `expr` that does not parse, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
 
-**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, a malformed expression.
+**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero).
 
 **Checking files without running them.** `validate(path) -> PackedStringArray` compiles every section of a file and returns one line per problem, without running anything and without pushing an error:
 
@@ -453,4 +473,4 @@ runner.free()
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.

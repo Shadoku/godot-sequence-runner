@@ -62,6 +62,41 @@ signal sequence_finished
 # What the loop waits on while an async command plays (run_sequence()).
 signal _resumed
 
+## The `$` references of an expression: a variable or a path (`$a`, `$piece.props.health`);
+## a segment followed by `(` is left to the Expression (a method call on what was read).
+static var _reference_regex: RegEx = null
+# What an expression calls its functions on (ExprScope), made on first use.
+var _expr_scope: ExprScope = null
+
+## An expression (a `set`'s or `set_prop`'s `expr`) as compile_expr() builds it:
+## its `$` references replaced by input names and parsed once, by Godot's
+## Expression; run_expr() resolves the references and executes it.
+class CompiledExpr extends RefCounted:
+	## The expression as written.
+	var text: String = ""
+	## The references it reads, without their `$`, in input order.
+	var paths: PackedStringArray = PackedStringArray()
+	## The parsed Expression (over `text` with each reference an input).
+	var expression: Expression = Expression.new()
+	## Whether it parsed; `error` says why not.
+	var ok: bool = false
+	var error: String = ""
+
+## What an expression may call besides Godot's built-in functions: random(min,
+## max) and random_int(min, max), on the runner's rng. The runner itself is not
+## exposed, so a bare name is a clear error.
+class ExprScope extends RefCounted:
+	var runner: sequence_runner
+
+	func _init(owner: sequence_runner) -> void:
+		runner = owner
+
+	func random(min_value: float, max_value: float) -> float:
+		return runner.random(min_value, max_value)
+
+	func random_int(min_value: int, max_value: int) -> int:
+		return runner.random_int(min_value, max_value)
+
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -416,10 +451,15 @@ func cmd_wait_signal(on: String, signal_name: String) -> Callable:
 		run_error("wait_signal: cannot locate object and/or signal: %s:%s" % [on, signal_name])
 		return null
 		
+## Sets the scratch-pad variable `var_name` to `value` resolved as a token and
+## typed (to_value()), or to `expr` evaluated (an expression, compiled now: a
+## syntax error is a compile problem and the command then does nothing).
 func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
+	var compiled := compile_command_expr("set", expr)
 	return func() -> Variant:
-		if expr != "":
-			scratch_pad[var_name] = evaluate_expr(expr)
+		if compiled != null:
+			if compiled.ok:
+				scratch_pad[var_name] = run_expr(compiled)
 		else:
 			scratch_pad[var_name] = to_value(resolve_value(value)) if value is String else value
 		return null
@@ -428,12 +468,15 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 ## resolves it, or a scratch-pad dictionary; path_root()): `value` resolved as a
 ## token, or `expr` evaluated as set's.
 func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -> Callable:
+	var compiled := compile_command_expr("set_prop", expr)
 	return func() -> Variant:
+		if compiled != null and not compiled.ok:
+			return null
 		var root: Variant = path_root(on)
 		if root == null:
 			run_error("set_prop: cannot locate object: " + on)
 			return null
-		var value: Variant = evaluate_expr(expr) if expr != "" else to_value(resolve_value(value_token))
+		var value: Variant = run_expr(compiled) if compiled != null else to_value(resolve_value(value_token))
 		write_property_path(root, prop, value)
 		return null
 
@@ -675,33 +718,93 @@ func _on_trigger_timer(timer: Timer) -> void:
 
 #func compile_sequence(parsed: Array[Dictionary] -> Array[Callable]:
 
-func evaluate_expr(expr: String) -> Variant:
-	var tokens := expr.split(" ")
-	
-	if tokens.size() == 1:
-		return resolve_value(tokens[0])
-	if tokens.size() == 3:
-		var left := to_float(resolve_value(tokens[0]))
-		var operator := str(tokens[1])
-		var right := to_float(resolve_value(tokens[2]))
-		match operator:
-			"+":
-				return left + right
-			"-":
-				return left - right
-			"*":
-				return left * right
-			"/":
-				if right != 0:
-					return left / right
-				else:
-					run_error("expression divides by zero: " + expr)
-					return 0
-			_:
-				run_error("expression has an unknown operator: " + operator)
-			
-	run_error("malformed expression: " + expr)
-	return 0
+## The regex of an expression's `$` references (see _reference_regex).
+static func reference_regex() -> RegEx:
+	if _reference_regex == null:
+		_reference_regex = RegEx.new()
+		_reference_regex.compile("\\$(\\w+(?:\\.(?!\\w+\\()\\w+)*)")
+	return _reference_regex
+
+## Compiles the expression `text`: every `$` reference (a variable or a path, as
+## any token reads one) becomes an input of a Godot Expression, parsed once.
+## `ok` is false, with `error`, when the text does not parse (what Expression
+## sees: syntax; an unknown function or member shows when it runs).
+static func compile_expr(text: String) -> CompiledExpr:
+	var compiled := CompiledExpr.new()
+	compiled.text = text
+	var names := PackedStringArray()
+	var rewritten := ""
+	var last := 0
+	for found: RegExMatch in reference_regex().search_all(text):
+		var path := found.get_string(1)
+		var at := compiled.paths.find(path)
+		if at < 0:
+			at = compiled.paths.size()
+			compiled.paths.append(path)
+			names.append("_r%d" % at)
+		rewritten += text.substr(last, found.get_start() - last) + names[at]
+		last = found.get_end()
+	rewritten += text.substr(last)
+	if compiled.expression.parse(rewritten, names) == OK:
+		compiled.ok = true
+	else:
+		compiled.error = compiled.expression.get_error_text()
+	return compiled
+
+## A command's `expr` compiled while its section is (the factories run then):
+## a syntax error is a compile_error() naming the command, listed by
+## validate(). Null when `expr` is empty.
+func compile_command_expr(cmd_name: String, expr: String) -> CompiledExpr:
+	if expr == "":
+		return null
+	var compiled := compile_expr(expr)
+	if not compiled.ok:
+		compile_error("<%s> expr \"%s\": %s" % [cmd_name, expr, compiled.error])
+	return compiled
+
+## Runs a compiled expression: each reference resolved (resolve_value(), its
+## errors as a token's) and typed by expr_input(), then executed against an
+## ExprScope. A failure (an unknown function, a member the Expression cannot
+## read, `'a' + 1`, an int divided by zero) is an error and reads as 0; so is a
+## float result that is not finite (a float divided by zero), so a division by
+## zero never passes as inf. The text is never the value.
+func run_expr(compiled: CompiledExpr) -> Variant:
+	if not compiled.ok:
+		run_error("expression \"%s\": %s" % [compiled.text, compiled.error])
+		return 0
+	var values: Array = []
+	for path: String in compiled.paths:
+		values.append(expr_input(resolve_value("$" + path)))
+	if _expr_scope == null:
+		_expr_scope = ExprScope.new(self)
+	var result: Variant = compiled.expression.execute(values, _expr_scope, false)
+	if compiled.expression.has_execute_failed():
+		run_error("expression \"%s\": %s" % [compiled.text, compiled.expression.get_error_text()])
+		return 0
+	if result is float and not is_finite(result):
+		run_error("expression \"%s\" divides by zero or overflows" % compiled.text)
+		return 0
+	return result
+
+## A reference's value as an expression reads it: typed by to_value() (a string
+## that reads as a number is one), then an int, a bool or null as a float, what
+## to_float() gives the other commands (`$i + 1` is 2.0, a flag adds as 1, an
+## unresolvable reference, already reported, reads as 0); anything else (a
+## string, a vector, an object, a dictionary, an array) as it is.
+static func expr_input(value: Variant) -> Variant:
+	var typed: Variant = to_value(value)
+	match typeof(typed):
+		TYPE_INT, TYPE_BOOL:
+			return float(typed)
+		TYPE_NIL:
+			return 0.0
+	return typed
+
+## Evaluates the expression `text` in one go, for code that has only a string
+## (a set's expr is compiled with its section instead): a syntax error is a
+## run-time error here.
+func evaluate_expr(text: String) -> Variant:
+	return run_expr(compile_expr(text))
 			
 	
 ## The object `path` names (call's and wait_signal's `on`, the head of a
@@ -771,7 +874,7 @@ func resolve_random(token: String) -> float:
 		return 0.0
 	var min_val := to_float(resolve_value(parts[0].strip_edges()))
 	var max_val := to_float(resolve_value(parts[1].strip_edges()))
-	return rng.randf_range(min_val, max_val) if rng != null else randf_range(min_val, max_val)
+	return random(min_val, max_val)
 	
 func resolve_random_int(token: String) -> int:
 	var opperands := token.trim_prefix("random_int(").trim_suffix(")")
@@ -781,7 +884,18 @@ func resolve_random_int(token: String) -> int:
 		return 0
 	var min_val := int(to_float(resolve_value(parts[0].strip_edges())))
 	var max_val := int(to_float(resolve_value(parts[1].strip_edges())))
-	return rng.randi_range(min_val, max_val) if rng != null else randi_range(min_val, max_val)
+	return random_int(min_val, max_val)
+
+## A random float in [min_value, max_value] from `rng` when one is set (seeded),
+## else the global generator: the token `random(min,max)` and the function
+## `random(min, max)` inside an expression.
+func random(min_value: float, max_value: float) -> float:
+	return rng.randf_range(min_value, max_value) if rng != null else randf_range(min_value, max_value)
+
+## A random int in [min_value, max_value], as random(): the token
+## `random_int(min,max)` and the function inside an expression.
+func random_int(min_value: int, max_value: int) -> int:
+	return rng.randi_range(min_value, max_value) if rng != null else randi_range(min_value, max_value)
 	
 ## A value as a float for the commands that take numbers: a number or a bool as
 ## it is, a String by its leading number (0 when it has none), null (a reference
