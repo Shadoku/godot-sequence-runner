@@ -204,7 +204,7 @@ runner.start("res://data/sequences/peg.xml", {"piece": peg, "stats": {"bonus": 2
 ```
 
 ```xml
-<goto_if label="broken" var="$piece.props.health" op="<=" value="0" />
+<goto_if label="broken" var="$piece.props.health" op="le" value="0" />
 <call on="target" method="add_score" arg0="$stats.bonus" />
 ```
 
@@ -247,13 +247,14 @@ An object it cannot find, or a segment it cannot read or write, is an error and 
 
 `goto_if` compares two values and jumps if the condition is true.
 
-Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`).
+Operators: `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod` (true when `a % b == 0`), and the word aliases `lt` (`<`), `gt` (`>`), `le` (`<=`) and `ge` (`>=`). An XML attribute may not hold a bare `<`, so prefer the aliases: `op="lt"` rather than `op="<"`. Any other operator is an error, and nothing jumps.
 
 ```xml
 <goto_if label="done" var="$counter" op=">=" value="5" />
+<goto_if label="none" var="$bin" op="lt" value="0" />   <!-- below 0 -->
 ```
 
-Each operand (`var` and `value`) is a scratch-pad variable's name or any token (`$name`, a path, a literal), typed as in [Typed Values](#typed-values). Two numbers (or bools, as 0 and 1) compare as numbers. When either operand is a string that does not read as a number, `eq` and `!=` compare the two as strings, and the other operators are an error (nothing jumps):
+Each operand (`var` and `value`) is a scratch-pad variable's name or any token (`$name`, a path, a literal), typed as in [Typed Values](#typed-values). Two numbers (or bools, as 0 and 1) compare as numbers. When either operand is a string that does not read as a number, `eq` and `!=` compare the two as strings, and the other operators (the aliases too) are an error (nothing jumps):
 
 ```xml
 <goto_if label="burn" var="$element" op="eq" value="fire" />

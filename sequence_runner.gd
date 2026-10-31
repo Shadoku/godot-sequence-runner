@@ -480,13 +480,20 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		write_property_path(root, prop, value)
 		return null
 
+## goto_if's word aliases of its comparison operators: an XML attribute cannot
+## hold a bare `<`, so `op="lt"` reads as `op="<"`, and so on.
+const GOTO_IF_OP_ALIASES := {"lt": "<", "gt": ">", "le": "<=", "ge": ">="}
+
 ## Jumps to `label` when `var_token` compared by `op` with `value_token` holds.
-## Each operand is a scratch-pad variable's name or a token, typed by
-## to_value(). When either is a string that does not read as a number, `eq`
-## and `!=` compare the two as strings and the other operators are an error;
-## otherwise both compare as numbers (a bool as 0 or 1). An operand that cannot
-## be resolved is an error, and nothing jumps.
-func cmd_goto_if(label: String, var_token: String, op: String, value_token: String) -> Callable:
+## `op` is `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod`, or one of the aliases
+## `lt`, `gt`, `le`, `ge` (GOTO_IF_OP_ALIASES). Each operand is a scratch-pad
+## variable's name or a token, typed by to_value(). When either is a string
+## that does not read as a number, `eq` and `!=` compare the two as strings and
+## the other operators (the aliases too) are an error; otherwise both compare
+## as numbers (a bool as 0 or 1). An operand that cannot be resolved, or an
+## unknown operator, is an error, and nothing jumps.
+func cmd_goto_if(label: String, var_token: String, op_name: String, value_token: String) -> Callable:
+	var op: String = GOTO_IF_OP_ALIASES.get(op_name, op_name)
 	return func() -> Variant:
 		var a: Variant = goto_if_operand(var_token)
 		if a == null:
@@ -504,7 +511,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 				"!=":
 					result = str(a) != str(b)
 				_:
-					run_error("goto_if: \"%s\" compares numbers, not the strings %s and %s" % [op, var_token, value_token])
+					run_error("goto_if: \"%s\" compares numbers, not the strings %s and %s" % [op_name, var_token, value_token])
 					return null
 		else:
 			var x := to_float(a)
@@ -525,7 +532,7 @@ func cmd_goto_if(label: String, var_token: String, op: String, value_token: Stri
 				"mod":
 					result = !fmod(x, y)
 				_:
-					run_error("goto_if: unknown operator: " + op)
+					run_error("goto_if: unknown operator: " + op_name)
 		if result:
 			jump(label)
 		return null
