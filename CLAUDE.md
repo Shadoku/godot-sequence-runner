@@ -159,6 +159,7 @@ check.toml             the check's stages, tiers, budget and cache settings
 tools/check.py         the one command to verify the project (language-agnostic; reads check.toml)
 sequence_runner.gd     the addon: the whole of it, the one file other projects copy
 README.md              the addon's documentation: every command, attribute and public method
+docs/card-game-additions-plan.md  the agreed plan of additions (steps, design, compatibility rules) and its status
 tools/godot.py         runs Godot headless on tests/ after copying the addon into it; finds the binary
 tools/install_godot.sh downloads the Godot pinned in .godot-version into ~/.cache/godot/
 .godot-version         the pinned Godot release
