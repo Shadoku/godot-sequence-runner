@@ -36,7 +36,16 @@ Labels live apart from the variables (`labels`), so a variable may share a label
 runner.sequence_finished.connect(_on_sequence_done)
 ```
 
-**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<call on="self" method="stop" />`.
+**Start and wait for the end:** `start_and_wait(path := "", vars := {}, section := "") -> bool` is a coroutine: it calls `start()` with the same arguments, then waits for `sequence_finished` only if the sequence is still running. Use it instead of `runner.start(); await runner.sequence_finished`, which hangs on a section of instant commands (it finishes, and emits `sequence_finished`, inside `start()`, before the `await` begins). It returns `false` at once when `start()` does (the file or section is missing), and `true` once the sequence has finished or was stopped.
+
+```gdscript
+if await runner.start_and_wait("res://data/cards/fireball.xml", {"caster": caster}, "on_play"):
+    pass  # the section has played to its end (or was stopped)
+```
+
+A file whose `<trigger>` defers the start (`signal`, `timer`) is not waited for: `start_and_wait()` returns `true` at once and the sequence plays when its trigger fires.
+
+**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<stop />` (or `<call on="self" method="stop" />`); `failed` stays `false`.
 
 ```gdscript
 runner.start("res://data/sequences/patrol.xml")   # loops forever
@@ -52,6 +61,8 @@ runner.stop()
 | `auto_start` | bool | `false` | Run automatically on `_ready` |
 | `target_self` | bool | `false` | Target the runner node instead of its parent |
 | `verbose` | bool | `false` | Print debug output: the chosen target (`Targeting parent` / `Targeting self`) and each `goto` jump (`Jumping to: ...`) |
+| `stop_on_error` | bool | `false` | Stop the sequence at its first run-time error and set `failed` (see [Errors and Validation](#errors-and-validation)); off, it carries on |
+| `max_instant_steps` | int | `100000` | The most commands a sequence may run without waiting before it is stopped with an error and `failed`; `0`: no limit (see [Errors and Validation](#errors-and-validation)) |
 
 ## XML Format
 
@@ -120,6 +131,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on a target object; `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
 | `pause` | `time` | Pause the scene tree (optionally for a duration) |
 | `unpause` | — | Unpause the scene tree |
+| `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
 
 ### Variables
 
@@ -460,7 +472,13 @@ func cmd_scale(x_token: String, y_token: String) -> Callable:
         return null
 ```
 
-A problem met while it runs (a value it cannot use, an object that is gone) goes through `run_error(message)`, which pushes an error naming the file and section.
+A problem met while it runs (a value it cannot use, an object that is gone) goes through `run_error(message)`, which pushes an error naming the file and section. With `stop_on_error` on, `run_error()` also stops the sequence and sets `failed`; a command that resolves its operands first and acts after should then check `failed` in between, as the built-ins do, so it has no side effect once an operand failed:
+
+```gdscript
+        var x := to_float(resolve_value(x_token))
+        if failed:
+            return null
+```
 
 **2. Factory function** — maps XML attributes to command arguments (the second argument is the command's index in the compiled sequence). A bad attribute *value* it can see at compile time goes through `compile_error(message)`, so `validate()` lists it too:
 
@@ -500,6 +518,21 @@ Every problem is reported with `push_error`, so it shows as an `ERROR:` line (an
 
 **Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero), a `<for_each>` whose `in` is not an array.
 
+**Stopping at the first run-time error.** With `stop_on_error = true` (an export, `false` by default), the first run-time error sets `failed = true` and stops the sequence as `stop()` does: `running` turns `false`, `stopped` `true`, and `sequence_finished` is emitted once. The command that met the error has no side effect after it: a built-in command checks for the error after resolving its operands and before acting, so `call` does not call the method (nor store `var`), `set` and `set_prop` do not write, `move` and `tween_move` do not move, `goto_if` does not jump, `pause` does not pause, `wait` and `wait_signal` do not wait. An error reported while the sequence waits (by game code calling `evaluate_expr()`, say) stops it too, and the wait is abandoned. `start()` clears `failed`. Errors pushed outside `run_error()` (a compile problem, a missing file or section, `to_float()`'s "not a number") do not set it.
+
+**A loop that never waits.** `max_instant_steps` (an export, `100000` by default) caps how many commands a sequence runs without waiting. A command that returns a signal (`wait`, `tween_move`, `wait_signal`, `call await`) makes the loop wait, and the count restarts after it; the waiting command itself counts before it waits. Past the cap, before the next command runs, an error naming the file, section and cap is pushed, `failed` turns `true` and the sequence stops as `stop()` does, whatever `stop_on_error` says, so a `goto` loop that forgot its `wait` stops instead of freezing the game. A chain hand-over (`start()` from inside the sequence) does not wait, so the count carries on into the new sequence. `0` disables the cap.
+
+```
+ERROR: sequence_runner: res://data/sequences/patrol.xml:: more than 100000 commands without waiting (max_instant_steps); the sequence is stopped
+```
+
+```gdscript
+runner.stop_on_error = true
+await runner.start_and_wait("res://data/cards/fireball.xml", {"target": card}, "on_play")
+if runner.failed:
+    pass  # an error cut the effect short; nothing ran after it
+```
+
 **Checking files without running them.** `validate(path) -> PackedStringArray` compiles every section of a file and returns one line per problem, without running anything and without pushing an error:
 
 ```
@@ -526,10 +559,24 @@ The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, 
 
 ## What's new
 
-Additions since the regression suite; every new public name is listed, so a subclass can check for clashes.
+Every public name added since the regression suite, so a subclass can check it does not already use one:
 
-- **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). No new public name; a path that indexes an array was an error before.
-- **Blocks** ([Blocks](#blocks)): the commands `if` (attribute `expr`), `else` and `for_each` (attributes `var`, `in`, `index`), registered by `register_commands()`, and their factories `factory_if_block()`, `factory_else_block()` and `factory_for_each_block()`. The reader adds end marker commands named `end_if` and `end_for_each` after `<if>` and `<for_each>` (only after those two elements). Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
+| Name | Kind | See |
+|---|---|---|
+| `start_and_wait(path, vars, section) -> bool` | method (coroutine) | [Getting Started](#getting-started) |
+| `stop_on_error` | export (bool, default `false`) | [Errors and Validation](#errors-and-validation) |
+| `failed` | member (bool) | [Errors and Validation](#errors-and-validation) |
+| `max_instant_steps` | export (int, default `100000`) | [Errors and Validation](#errors-and-validation) |
+| `<stop />` | command | [Commands](#commands) |
+| `factory_stop(args, index) -> Callable` | method (the `stop` command's factory) | [Extending](#extending) |
+| `<if expr>`, `<else />`, `<for_each var in index>` | commands | [Blocks](#blocks) |
+| `end_if`, `end_for_each` | command names the reader adds after `<if>` and `<for_each>` (only those two elements) | [Blocks](#blocks) |
+| `factory_if_block()`, `factory_else_block()`, `factory_for_each_block()` | methods (the block commands' factories) | [Blocks](#blocks) |
+
+Without a new name:
+
+- **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). A path that indexes an array was an error before.
+- **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 
 ## Development
 

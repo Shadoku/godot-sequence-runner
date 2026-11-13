@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- start_and_wait(): "instant" finishes inside start(), "async" waits a moment
+     before its ping, "chain" hands over to ping.xml. -->
+<data>
+	<sequence name="instant">
+		<call method="ping" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="async">
+		<wait seconds="0.02" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="chain">
+		<call on="self" method="start" arg0="res://fixtures/sequences/ping.xml" />
+	</sequence>
+</data>
