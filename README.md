@@ -208,7 +208,21 @@ runner.start("res://data/sequences/peg.xml", {"piece": peg, "stats": {"bonus": 2
 <call on="target" method="add_score" arg0="$stats.bonus" />
 ```
 
-A segment that cannot be read (a missing dictionary key, a property the object lacks) is an error and the reference reads as `null`; numeric commands (`move`, `wait`, expressions...) read `null` as `0`. Writing through a path is [`set_prop`](#writing-properties)'s job, and creates a missing key.
+Paths step into an `Array` (or a packed array, such as a `PackedStringArray`) by index, counted from 0:
+
+```gdscript
+runner.start("res://data/cards/volley.xml", {"targets": [goblin, troll], "card": {"tags": ["fire", "flying"]}})
+```
+
+```xml
+<call on="target" method="hit" arg0="$targets.0" />
+<goto_if label="burn" var="$card.tags.0" op="eq" value="fire" />
+<set var="first_hp" expr="$targets.0.health" />
+```
+
+A segment indexes an array only when it is all digits (`0`, `12`); there are no negative indices. An index past the end is a segment that cannot be read, as a missing key is.
+
+A segment that cannot be read (a missing dictionary key, a property the object lacks, an index out of range) is an error and the reference reads as `null`; numeric commands (`move`, `wait`, expressions...) read `null` as `0`. Writing through a path is [`set_prop`](#writing-properties)'s job, and creates a missing key.
 
 ### Named Objects
 
@@ -232,16 +246,18 @@ A scratch-pad object that has been freed is an error (the command finds no objec
 
 ### Writing Properties
 
-`set_prop` writes at the path `prop` of the object `on` names (resolved like `call`'s, or a scratch-pad dictionary), with `value` (a token, resolved like `set`'s) or `expr` (an [expression](#expressions), as `set`'s). The path's last segment is an object's property, a dictionary key (created when missing) or a `Vector2` / `Vector3` component (the vector is read, changed and written back, so `position.x` moves the node):
+`set_prop` writes at the path `prop` of the object `on` names (resolved like `call`'s, or a scratch-pad dictionary or array), with `value` (a token, resolved like `set`'s) or `expr` (an [expression](#expressions), as `set`'s). The path's last segment is an object's property, a dictionary key (created when missing), an array index within the array's size (an array never grows) or a `Vector2` / `Vector3` component (the vector is read, changed and written back, so `position.x` moves the node):
 
 ```xml
 <set_prop on="world" prop="gravity_scale" value="0.5" />
 <set_prop on="piece" prop="props.health" expr="$piece.props.health - 1" />
 <set_prop prop="position.x" value="120" />
 <set_prop on="stats" prop="combo" value="0" />
+<set_prop on="hand" prop="0" value="$drawn" />          <!-- the first element of the array $hand -->
+<set_prop on="card" prop="tags.1" value="'cold'" />
 ```
 
-An object it cannot find, or a segment it cannot read or write, is an error and nothing is written.
+An object it cannot find, or a segment it cannot read or write (an index out of range, an element of a packed array, which is a copy), is an error and nothing is written.
 
 ### Conditional Jumps
 
@@ -475,6 +491,12 @@ runner.free()
 ## Architecture
 
 The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
+
+## What's new
+
+Additions since the regression suite; every new public name is listed, so a subclass can check for clashes.
+
+- **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). No new public name; a path that indexes an array was an error before.
 
 ## Development
 

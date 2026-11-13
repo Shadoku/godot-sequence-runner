@@ -919,9 +919,9 @@ static func to_float(value: Variant) -> float:
 	return 0.0
 
 ## The value at `path` (`body.radius`, `target.global_position.x`,
-## `piece.props.health`): its head found by path_root(), then per segment an
-## Object's property, a Dictionary's key or a Vector2 / Vector3 component
-## (read_member()). A path of one segment is the head itself (`$target`).
+## `piece.props.health`, `hand.0`): its head found by path_root(), then per
+## segment an Object's property, a Dictionary's key, a Vector2 / Vector3
+## component or an Array's index (read_member()). A path of one segment is the head itself (`$target`).
 ## Null, with an error, when the head or a segment cannot be found (a missing
 ## dictionary key is one).
 func resolve_property_path(path: String) -> Variant:
@@ -949,9 +949,13 @@ func path_root(head: String) -> Variant:
 	return resolve_target(key)
 
 ## Reads the member `key` of `container`: an Object's property, a Dictionary's
-## key (a String key, or its StringName), a Vector2's or Vector3's component.
+## key (a String key, or its StringName), a Vector2's or Vector3's component, an
+## Array's or packed array's element by index (`0`, `1`... within its size).
 ## [true, the value], or [false, null] when the container has no such member.
 static func read_member(container: Variant, key: String) -> Array:
+	var at := _path_index(container, key)
+	if at >= 0:
+		return [true, container[at]]
 	match typeof(container):
 		TYPE_OBJECT:
 			if is_instance_valid(container) and key in container:
@@ -980,10 +984,23 @@ static func read_member(container: Variant, key: String) -> Array:
 					return [true, v3.z]
 	return [false, null]
 
+# The index a path segment names in an Array or a packed array: `key` all
+# digits and within the container's size; -1 otherwise (not an array, not an
+# index, out of range).
+static func _path_index(container: Variant, key: String) -> int:
+	var kind := typeof(container)
+	if kind != TYPE_ARRAY and (kind < TYPE_PACKED_BYTE_ARRAY or kind > TYPE_PACKED_VECTOR4_ARRAY):
+		return -1
+	if key == "" or key.lstrip("0123456789") != "":
+		return -1
+	var at := key.to_int()
+	return at if at >= 0 and at < container.size() else -1
+
 ## Writes `value` at the path `prop` (`gravity_scale`, `props.health`,
-## `position.x`) from `root` (an Object or a Dictionary). Every segment but the
-## last is read (read_member()); the last is an Object's property, a
-## Dictionary's key (created when missing) or a Vector2 / Vector3 component, and
+## `position.x`, `tags.0`) from `root` (an Object, a Dictionary or an Array).
+## Every segment but the last is read (read_member()); the last is an Object's
+## property, a Dictionary's key (created when missing), a Vector2 / Vector3
+## component or an Array's index within its size, and
 ## a value read on the way (a vector) is written back into its parent. False,
 ## with an error, when a segment cannot be read or written.
 func write_property_path(root: Variant, prop: String, value: Variant) -> bool:
@@ -1011,9 +1028,17 @@ static func write_path(container: Variant, parts: PackedStringArray, at: int, va
 	return write_member(container, key, written[1])
 
 ## Writes the member `key` of `container` (as read_member() reads it; a
-## Dictionary's missing key is created). [true, the container as written] or
-## [false, container] when it has no such member.
+## Dictionary's missing key is created, an Array's element is written only
+## within its size; a packed array is not written). [true, the container as
+## written] or [false, container] when it has no such member.
 static func write_member(container: Variant, key: String, value: Variant) -> Array:
+	if typeof(container) == TYPE_ARRAY:
+		var at := _path_index(container, key)
+		if at < 0:
+			return [false, container]
+		var list: Array = container
+		list[at] = value
+		return [true, list]
 	match typeof(container):
 		TYPE_OBJECT:
 			if is_instance_valid(container) and key in container:

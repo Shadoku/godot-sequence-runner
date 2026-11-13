@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Array indices in property paths: read ($list.0, $card.tags.1, $grid.1.0,
+     an object's array property, a packed array, inside an expression), written
+     by set_prop, and an index out of range (an error, as a missing key is). -->
+<data>
+	<sequence>
+		<call method="record" arg0="$list.0" />
+		<call method="record" arg0="$grid.1.0" />
+		<call method="record" arg0="$target.items.2" />
+		<set var="sum" expr="$list.0 + $list.2" />
+		<call method="say" arg0="$card.tags.1" />
+		<call method="say" arg0="$names.1" />
+	</sequence>
+	<sequence name="write">
+		<set_prop on="list" prop="0" value="10" />
+		<set_prop on="card" prop="tags.1" value="'cold'" />
+		<set_prop on="grid" prop="1.0" expr="$grid.1.0 * 2" />
+		<set_prop prop="items.0" value="9" />
+		<set_prop on="list" prop="1" value="$list.2" />
+	</sequence>
+	<sequence name="out_of_range">
+		<set var="read" value="$list.3" />
+		<set_prop on="list" prop="3" value="1" />
+		<set var="word" value="$list.first" />
+		<call method="ping" />
+	</sequence>
+</data>
