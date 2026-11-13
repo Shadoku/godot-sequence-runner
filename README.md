@@ -36,6 +36,15 @@ Labels live apart from the variables (`labels`), so a variable may share a label
 runner.sequence_finished.connect(_on_sequence_done)
 ```
 
+**Start and wait for the end:** `start_and_wait(path := "", vars := {}, section := "") -> bool` is a coroutine: it calls `start()` with the same arguments, then waits for `sequence_finished` only if the sequence is still running. Use it instead of `runner.start(); await runner.sequence_finished`, which hangs on a section of instant commands (it finishes, and emits `sequence_finished`, inside `start()`, before the `await` begins). It returns `false` at once when `start()` does (the file or section is missing), and `true` once the sequence has finished or was stopped.
+
+```gdscript
+if await runner.start_and_wait("res://data/cards/fireball.xml", {"caster": caster}, "on_play"):
+    pass  # the section has played to its end (or was stopped)
+```
+
+A file whose `<trigger>` defers the start (`signal`, `timer`) is not waited for: `start_and_wait()` returns `true` at once and the sequence plays when its trigger fires.
+
 **Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<call on="self" method="stop" />`.
 
 ```gdscript
@@ -475,6 +484,14 @@ runner.free()
 ## Architecture
 
 The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
+
+## What's new
+
+Every public name added since the regression suite, so a subclass can check it does not already use one:
+
+| Name | Kind | See |
+|---|---|---|
+| `start_and_wait(path, vars, section) -> bool` | method (coroutine) | [Getting Started](#getting-started) |
 
 ## Development
 

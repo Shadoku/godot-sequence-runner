@@ -154,7 +154,21 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 	else:
 		run_sequence(sequence)
 	return true
-		
+
+## A coroutine: start() with the same arguments, then waits for
+## sequence_finished only if the sequence is still running, so
+## `await runner.start_and_wait(...)` never hangs on a section of instant
+## commands (it finishes inside start()). Returns false at once when start()
+## does (no such section, no file), true once the sequence has finished or was
+## stopped. A file whose <trigger> defers the start (signal, timer) is not
+## waited for: it returns true at once and the sequence plays later.
+func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
+	if not start(path, vars, section):
+		return false
+	if running:
+		await sequence_finished
+	return true
+
 #sequence_runner.attach($node, "res://data/sequences/whatever.xml")
 ## `vars` seed the scratch pad and `section` picks the section when `auto` starts
 ## the runner here.
