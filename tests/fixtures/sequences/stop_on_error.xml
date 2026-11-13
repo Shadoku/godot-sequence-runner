@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- stop_on_error, failed and <stop/>. Each section but the last two meets a
+     run-time error ($missing cannot be resolved, random(1) is malformed) in a
+     built-in command, then pings: with stop_on_error the command has no side
+     effect and the ping never runs; without it both happen, as before. -->
+<data>
+	<sequence name="call">
+		<call method="take" arg0="$missing" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="set">
+		<set var="a" value="$missing" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="set_expr">
+		<set var="a" expr="$missing + 1" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="set_prop">
+		<set_prop on="target" prop="props.health" value="$missing" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="set_prop_expr">
+		<set_prop on="target" prop="props.health" expr="$missing + 1" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="move">
+		<move x="$missing" y="5" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="tween_move">
+		<tween_move x="$missing" y="5" duration="0.01" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="goto_if">
+		<goto_if label="skip" var="random(1)" op="eq" value="0" />
+		<call method="take" arg0="1" />
+		<label name="skip" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="wait">
+		<wait seconds="$missing" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="pause">
+		<pause time="$missing" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="wait_signal">
+		<wait_signal on="$gone" signal="fired" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="two_errors">
+		<call method="take" arg0="$missing" />
+		<call method="take" arg0="$missing_too" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="waiting">
+		<wait_signal on="target" signal="fired" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="clean">
+		<call method="ping" />
+	</sequence>
+	<sequence name="stop">
+		<call method="ping" />
+		<stop />
+		<call method="ping" />
+	</sequence>
+</data>

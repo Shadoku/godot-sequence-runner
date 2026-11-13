@@ -45,7 +45,7 @@ if await runner.start_and_wait("res://data/cards/fireball.xml", {"caster": caste
 
 A file whose `<trigger>` defers the start (`signal`, `timer`) is not waited for: `start_and_wait()` returns `true` at once and the sequence plays when its trigger fires.
 
-**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<call on="self" method="stop" />`.
+**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<stop />` (or `<call on="self" method="stop" />`); `failed` stays `false`.
 
 ```gdscript
 runner.start("res://data/sequences/patrol.xml")   # loops forever
@@ -61,6 +61,7 @@ runner.stop()
 | `auto_start` | bool | `false` | Run automatically on `_ready` |
 | `target_self` | bool | `false` | Target the runner node instead of its parent |
 | `verbose` | bool | `false` | Print debug output: the chosen target (`Targeting parent` / `Targeting self`) and each `goto` jump (`Jumping to: ...`) |
+| `stop_on_error` | bool | `false` | Stop the sequence at its first run-time error and set `failed` (see [Errors and Validation](#errors-and-validation)); off, it carries on |
 
 ## XML Format
 
@@ -126,6 +127,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on a target object; `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
 | `pause` | `time` | Pause the scene tree (optionally for a duration) |
 | `unpause` | — | Unpause the scene tree |
+| `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
 
 ### Variables
 
@@ -421,7 +423,13 @@ func cmd_scale(x_token: String, y_token: String) -> Callable:
         return null
 ```
 
-A problem met while it runs (a value it cannot use, an object that is gone) goes through `run_error(message)`, which pushes an error naming the file and section.
+A problem met while it runs (a value it cannot use, an object that is gone) goes through `run_error(message)`, which pushes an error naming the file and section. With `stop_on_error` on, `run_error()` also stops the sequence and sets `failed`; a command that resolves its operands first and acts after should then check `failed` in between, as the built-ins do, so it has no side effect once an operand failed:
+
+```gdscript
+        var x := to_float(resolve_value(x_token))
+        if failed:
+            return null
+```
 
 **2. Factory function** — maps XML attributes to command arguments (the second argument is the command's index in the compiled sequence). A bad attribute *value* it can see at compile time goes through `compile_error(message)`, so `validate()` lists it too:
 
@@ -461,6 +469,15 @@ Every problem is reported with `push_error`, so it shows as an `ERROR:` line (an
 
 **Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero).
 
+**Stopping at the first run-time error.** With `stop_on_error = true` (an export, `false` by default), the first run-time error sets `failed = true` and stops the sequence as `stop()` does: `running` turns `false`, `stopped` `true`, and `sequence_finished` is emitted once. The command that met the error has no side effect after it: a built-in command checks for the error after resolving its operands and before acting, so `call` does not call the method (nor store `var`), `set` and `set_prop` do not write, `move` and `tween_move` do not move, `goto_if` does not jump, `pause` does not pause, `wait` and `wait_signal` do not wait. An error reported while the sequence waits (by game code calling `evaluate_expr()`, say) stops it too, and the wait is abandoned. `start()` clears `failed`. Errors pushed outside `run_error()` (a compile problem, a missing file or section, `to_float()`'s "not a number") do not set it.
+
+```gdscript
+runner.stop_on_error = true
+await runner.start_and_wait("res://data/cards/fireball.xml", {"target": card}, "on_play")
+if runner.failed:
+    pass  # an error cut the effect short; nothing ran after it
+```
+
 **Checking files without running them.** `validate(path) -> PackedStringArray` compiles every section of a file and returns one line per problem, without running anything and without pushing an error:
 
 ```
@@ -492,6 +509,10 @@ Every public name added since the regression suite, so a subclass can check it d
 | Name | Kind | See |
 |---|---|---|
 | `start_and_wait(path, vars, section) -> bool` | method (coroutine) | [Getting Started](#getting-started) |
+| `stop_on_error` | export (bool, default `false`) | [Errors and Validation](#errors-and-validation) |
+| `failed` | member (bool) | [Errors and Validation](#errors-and-validation) |
+| `<stop />` | command | [Commands](#commands) |
+| `factory_stop(args, index) -> Callable` | method (the `stop` command's factory) | [Extending](#extending) |
 
 ## Development
 

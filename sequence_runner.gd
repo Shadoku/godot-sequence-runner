@@ -18,6 +18,9 @@ static var problem_cache: Dictionary = {}
 @export var target_self: bool = false
 ## Print what the runner does (its target, each goto's jump) for debugging.
 @export var verbose: bool = false
+## Stop the sequence at its first run-time error (run_error()) and set `failed`.
+## Off: a run-time error is reported and the sequence carries on.
+@export var stop_on_error: bool = false
 
 var target: Node = null
 var sequence: Array[Callable] = []
@@ -44,6 +47,9 @@ var trigger_config: Dictionary = {}
 
 ## Whether the last sequence was cut by stop() rather than played to its end.
 var stopped: bool = false
+## Whether the last sequence was stopped by a run-time error (with
+## stop_on_error on). start() clears it.
+var failed: bool = false
 
 var _commands_registered: bool = false
 # Bumped by every run_sequence() and stop(): a command's signal from an older
@@ -137,6 +143,7 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 		return false
 	index = 0
 	stopped = false
+	failed = false
 	current_section = section
 	scratch_pad = {}
 	scratch_pad.merge(vars)
@@ -207,6 +214,7 @@ func register_commands() -> void:
 	register_command("tween_move", factory_tween_move, PackedStringArray(["x", "y", "duration"]))
 	register_command("wait_signal", factory_wait_signal, PackedStringArray(["on", "signal"]))
 	register_command("set_prop", factory_set_prop, PackedStringArray(["on", "prop", "value", "expr"]))
+	register_command("stop", factory_stop, PackedStringArray())
 
 ## Registers the command `cmd_name`: `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from an element's attributes, and `attributes` are the
@@ -321,9 +329,14 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 
 ## Reports a problem met while running (an unresolvable reference, a missing
 ## object, method, signal or key, a bad operand...) as an error naming the file
-## and section. The sequence goes on.
+## and section. The sequence goes on, unless stop_on_error is on: then `failed`
+## turns true and the sequence stops (stop()), and the built-in command that met
+## the error does nothing more (it checks `failed` before acting).
 func run_error(message: String) -> void:
 	push_error("sequence_runner: %s:%s: %s" % [xml_path, current_section, message])
+	if stop_on_error:
+		failed = true
+		stop()
 
 ## Reports, through compile_error(), each attribute of `args` that `accepted`
 ## (register_command()'s list for `cmd_name`) does not hold.
@@ -338,6 +351,8 @@ func cmd_move(x_token: String, y_token: String) -> Callable:
 		if target:
 			var x := to_float(resolve_value(x_token))
 			var y := to_float(resolve_value(y_token))
+			if failed:
+				return null
 			target.global_position = Vector2(x, y)
 			#target.global_position = position
 		return null
@@ -345,14 +360,18 @@ func cmd_move(x_token: String, y_token: String) -> Callable:
 func cmd_wait(time_token: String = "0") -> Callable:
 	return func() -> Variant:
 		var time := to_float(resolve_value(time_token))
+		if failed:
+			return null
 		#print("waiting...")
 		return get_tree().create_timer(time).timeout
 		
 func cmd_pause(time_token: String = "0.016") -> Callable:
 	return func() -> Variant:
 		#print("waiting...")
-		get_tree().paused = true
 		var time := to_float(resolve_value(time_token))
+		if failed:
+			return null
+		get_tree().paused = true
 		if time > 0:
 			var timer := get_tree().create_timer(time, true, false, false)
 			timer.timeout.connect(func() -> void: get_tree().paused = false)
@@ -433,6 +452,8 @@ func cmd_call(on: String, method: String, args_tokens: Array, var_name: String =
 				resolved_args.append(to_value(resolve_value(token)))
 			else:
 				resolved_args.append(token)
+		if failed:
+			return null
 		if target_node == null or not target_node.has_method(method):
 			run_error("call: cannot locate object and/or method: %s:%s" % [on, method])
 			return null
@@ -460,6 +481,8 @@ static func is_coroutine(value: Variant) -> bool:
 func cmd_wait_signal(on: String, signal_name: String) -> Callable:
 	return func() -> Variant:
 		var source: Object = resolve_target(on)
+		if failed:
+			return null
 		if source and source.has_signal(signal_name):
 			return Signal(source, signal_name)
 		run_error("wait_signal: cannot locate object and/or signal: %s:%s" % [on, signal_name])
@@ -473,9 +496,15 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 	return func() -> Variant:
 		if compiled != null:
 			if compiled.ok:
-				scratch_pad[var_name] = run_expr(compiled)
+				var result: Variant = run_expr(compiled)
+				if failed:
+					return null
+				scratch_pad[var_name] = result
 		else:
-			scratch_pad[var_name] = to_value(resolve_value(value)) if value is String else value
+			var typed: Variant = to_value(resolve_value(value)) if value is String else value
+			if failed:
+				return null
+			scratch_pad[var_name] = typed
 		return null
 			
 ## Writes at the path `prop` of what `on` names (an object as call's `on`
@@ -487,10 +516,14 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		if compiled != null and not compiled.ok:
 			return null
 		var root: Variant = path_root(on)
+		if failed:
+			return null
 		if root == null:
 			run_error("set_prop: cannot locate object: " + on)
 			return null
 		var value: Variant = run_expr(compiled) if compiled != null else to_value(resolve_value(value_token))
+		if failed:
+			return null
 		write_property_path(root, prop, value)
 		return null
 
@@ -516,6 +549,8 @@ func cmd_goto_if(label: String, var_token: String, op_name: String, value_token:
 		var b: Variant = goto_if_operand(value_token)
 		if b == null:
 			run_error("goto_if: cannot resolve the second operand: " + value_token)
+			return null
+		if failed:
 			return null
 		var result := false
 		if a is String or b is String:
@@ -559,8 +594,11 @@ func goto_if_operand(token: String) -> Variant:
 func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Callable:
 	return func() -> Variant:
 		var pos := Vector2(to_float(resolve_value(x_token)), to_float(resolve_value(y_token)))
+		var duration := to_float(resolve_value(dur_token))
+		if failed:
+			return null
 		var tween := create_tween()
-		tween.tween_property(target, "global_position", pos, to_float(resolve_value(dur_token)))
+		tween.tween_property(target, "global_position", pos, duration)
 		_tween = tween
 		return tween.finished
 
@@ -1130,3 +1168,9 @@ func factory_set_prop(args: Dictionary, _index: int) -> Callable:
 
 func factory_tween_move(args: Dictionary, _index: int) -> Callable:
 	return cmd_tween_move(str(args.get("x", 0)), str(args.get("y", 0)), str(args.get("duration", 0)))
+
+## `<stop/>`: ends the sequence with stop() (`stopped` true, `failed` false).
+func factory_stop(_args: Dictionary, _index: int) -> Callable:
+	return func() -> Variant:
+		stop()
+		return null
