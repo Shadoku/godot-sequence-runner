@@ -111,6 +111,9 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `label` | `name` | Define a named jump target |
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
+| `if` … `else` … `/if` | `expr` | Run the commands inside when the [expression](#expressions) holds, else those after `<else/>` (optional; see [Blocks](#blocks)) |
+| `else` | — | Inside an `<if>`: starts the part that runs when `expr` does not hold |
+| `for_each` … `/for_each` | `var`, `in`, `index` (optional) | Run the commands inside once per element of an array (see [Blocks](#blocks)) |
 | `set` | `var`, `value` or `expr` | Set a scratch pad variable to a token or an [expression](#expressions) |
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
@@ -148,6 +151,8 @@ Set variables with `set` and reference them anywhere with the `$` prefix:
 **Numbers.** A reference that is an int, a bool or null reads as a float, as every other command reads its numbers (`$i + 1` is `2.0`, a flag adds as 1, an unresolvable reference, already reported, reads as 0); a string that reads as a number is one. Literals read as GDScript reads them: `$period / 2` is `0.5` when `period` is `1.0`, but `7 / 2` on two int literals is `3`. A string, a vector, an object, a dictionary or an array reads as it is (`$pos.length()`, `$name + '!'`).
 
 **Functions.** Besides Godot's, `random(min, max)` and `random_int(min, max)` draw from the runner's `rng` ([Random Values](#random-values)). An expression sees nothing else: a bare name is an error.
+
+**`<`, `>` and `&` in XML.** An expression sits in an XML attribute, where a bare `<` and `&` are not valid XML. Write them as the entities `&lt;`, `&gt;` and `&amp;`: Godot's `XMLParser` decodes them (and `&quot;`, `&apos;`, `&#60;`, `&#x3C;`) before the expression is compiled, so `expr="$hp &lt;= 0"` reads as `$hp <= 0` and `expr="$a &gt; 0 &amp;&amp; $b &gt; 0"` as `$a > 0 && $b > 0`. A bare `>` is valid XML and works as it is. (Godot's parser also happens to accept a bare `<` inside an attribute, but editors and other XML tools reject the file, so use `&lt;`; `and`, `or` and `not` need no escaping at all.)
 
 **Errors.** An expression that does not parse is a compile problem (`validate()` lists it, `start()` pushes it) and the command does nothing. A failure while it runs (an unknown function, a member it cannot read, `'a' + 1`, a division by zero, a float that overflows) is an error and the expression reads as `0`; the sequence carries on. Expressions are compiled with their section and executed per run.
 
@@ -278,6 +283,33 @@ Each operand (`var` and `value`) is a scratch-pad variable's name or any token (
 ```
 
 An operand that cannot be resolved is an error, and nothing jumps.
+
+### Blocks
+
+`<if>` and `<for_each>` hold commands between their start and end tags, so a sequence can branch and loop without labels:
+
+```xml
+<if expr="$target.health &lt;= 0">
+  <call on="board" method="destroy" arg0="$target" />
+<else />
+  <call on="target" method="flash" />
+</if>
+
+<for_each var="enemy" in="$enemies" index="i">
+  <call on="enemy" method="take_damage" arg0="2" />
+  <wait seconds="0.1" />
+</for_each>
+```
+
+**`<if expr="...">`** evaluates `expr`, an [expression](#expressions) compiled with the section as `set`'s is. When the result is truthy (`true`, a number other than 0, a non-empty string or array, an object) the commands up to `<else/>` (or up to `</if>`) run and those after `<else/>` are skipped; otherwise the first part is skipped and the part after `<else/>` runs. `<else/>` is optional. Write `<` as `&lt;` (see [Expressions](#expressions)). A missing `expr`, or one that does not parse, is a compile problem and reads as false. An `<else/>` that is not directly inside an `<if>` (at the top of a section, or inside a `<for_each>` inside the `<if>`) is a compile problem and does nothing, as is a second `<else/>` in one `<if>`.
+
+**`<for_each var="m" in="$list" index="i">`** resolves `in` as a token (`$list`, a path such as `$board.enemies`, `$card.targets.0`) to an `Array` (or a packed array), takes a copy of it, and runs the commands inside once per element, with `$m` set to the element and `$i` (when `index` is given) to its position from 0, an int. The copy is taken when the loop is entered, so changing the source array inside the body (a card that dies and leaves the board mid-loop) does not shift or shorten the rounds. An empty array skips the body; something that is not an array is an error and skips the body too. A missing `in` is a compile problem. After the loop, `$m` and `$i` keep the last round's values.
+
+**Nesting, labels and `goto`.** Blocks nest in any combination (a loop in a loop, an `<if>` in a loop, a loop in an `<if>`). Labels inside blocks work as anywhere else: a `goto` to a label just before `</for_each>` goes on to the next round, and a `goto` (or `goto_if`) to a label outside a loop abandons it, so entering that `<for_each>` again from above starts a fresh loop over a fresh copy, and jumping back into an abandoned loop's body runs it once to `</for_each>` and goes on past it. Loop state lives in the runner (per `<for_each>`), not in the scratch pad, and `start()` clears it.
+
+**How it is read.** The reader stays flat: only `<if>` and `<for_each>` get an extra end marker command (`end_if`, `end_for_each`) where they end (at once when self-closed, `<if expr="..." />` being an empty block). Every other element reads as before, nested or not: `<wait seconds="1"></wait>` is one `wait`, and an element nested in another is simply the next command. The compiler pairs `<if>`, `<else/>` and the markers with a stack. The marker names `end_if` and `end_for_each` are therefore taken; do not write them as elements.
+
+**A subclass's own `if` or `for_each`.** A subclass that registers a command named `if` or `for_each` (after `super.register_commands()`) keeps it: its factory builds the command as any other, and that name's end markers compile to no-ops without a compile problem. `<else/>` stays the built-in one, so with a subclass's own `if` it is reported as outside an `<if>` unless the subclass registers `else` too.
 
 ### Calling Methods
 
@@ -464,9 +496,9 @@ A factory put straight into `command_factories` (`command_factories["scale"] = f
 
 Every problem is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
 
-**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, an `expr` that does not parse, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
+**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, an `expr` that does not parse, an `<if>` without `expr`, a `<for_each>` without `in`, an `<else/>` outside an `<if>` or a second one in the same `<if>`, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
 
-**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero).
+**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero), a `<for_each>` whose `in` is not an array.
 
 **Checking files without running them.** `validate(path) -> PackedStringArray` compiles every section of a file and returns one line per problem, without running anything and without pushing an error:
 
@@ -490,13 +522,14 @@ runner.free()
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions, then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it). Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one flat list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`; an `<if>` or `<for_each>` is followed where it ends by an end marker command, `end_if` or `end_for_each`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions (blocks are paired first, so an `<if>`, its `<else/>` and a `<for_each>` know the index to jump to, and a `<for_each>`'s end marker jumps back), then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it); the state of the `<for_each>` loops under way is kept apart from it, per `<for_each>` command, and also reset by `start()`. Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
 
 ## What's new
 
 Additions since the regression suite; every new public name is listed, so a subclass can check for clashes.
 
 - **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). No new public name; a path that indexes an array was an error before.
+- **Blocks** ([Blocks](#blocks)): the commands `if` (attribute `expr`), `else` and `for_each` (attributes `var`, `in`, `index`), registered by `register_commands()`, and their factories `factory_if_block()`, `factory_else_block()` and `factory_for_each_block()`. The reader adds end marker commands named `end_if` and `end_for_each` after `<if>` and `<for_each>` (only after those two elements). Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 
 ## Development
 

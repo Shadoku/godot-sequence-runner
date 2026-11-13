@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What the reader makes of nested and non-self-closed elements: an ordinary
+     element closed by a tag and an unknown element nested in another read as
+     before (flat, the end tag ignored; <note> is an unknown command); only <if>
+     and <for_each> get an end marker, at their end or at once when self-closed. -->
+<data>
+	<sequence>
+		<wait seconds="0"></wait>
+		<call method="ping"><note text="x" /></call>
+		<if expr="1" />
+		<for_each var="m" in="$list"></for_each>
+		<if expr="0"><else /></if>
+	</sequence>
+</data>

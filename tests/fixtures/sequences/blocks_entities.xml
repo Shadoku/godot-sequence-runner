@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Godot's XMLParser decodes entities in attribute values: &lt; reads as <,
+     &gt; as >, &amp; as &, so an expr can compare with < and use &&. -->
+<data>
+	<sequence>
+		<if expr="$n &lt; 3">
+			<call method="record" arg0="1" />
+		<else />
+			<call method="record" arg0="2" />
+		</if>
+		<set var="between" expr="$n &gt;= 1 &amp;&amp; $n &lt;= 4" />
+	</sequence>
+</data>

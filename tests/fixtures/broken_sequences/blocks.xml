@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Block problems validate() lists: an <else/> outside an <if> (at the top and
+     directly inside a <for_each>), an expr that does not parse, an unknown
+     attribute, a <for_each> without "in", a second <else/>, an <if> without
+     "expr". -->
+<data>
+	<sequence>
+		<else />
+		<if expr="1 +">
+			<call method="ping" />
+		</if>
+		<for_each var="m" of="$list">
+			<else />
+		</for_each>
+		<if expr="true">
+		<else />
+		<else />
+		</if>
+		<if>
+			<call method="ping" />
+		</if>
+		<call method="ping" />
+	</sequence>
+</data>

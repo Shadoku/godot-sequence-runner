@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An <if> and a <for_each> without <else/>: a subclass that registers its own
+     "if" or "for_each" runs them through its factory; the end markers do nothing. -->
+<data>
+	<sequence>
+		<if expr="false">
+			<call method="record" arg0="1" />
+		</if>
+		<for_each var="m" in="$list">
+			<call method="record" arg0="2" />
+		</for_each>
+		<call method="record" arg0="3" />
+	</sequence>
+</data>

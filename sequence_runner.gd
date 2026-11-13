@@ -140,6 +140,7 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 	current_section = section
 	scratch_pad = {}
 	scratch_pad.merge(vars)
+	_for_each_states = {}
 	var commands: Array[Dictionary] = parsed[section]
 	labels = label_map(commands)
 	if not label_cache.has(xml_path):
@@ -193,6 +194,9 @@ func register_commands() -> void:
 	register_command("tween_move", factory_tween_move, PackedStringArray(["x", "y", "duration"]))
 	register_command("wait_signal", factory_wait_signal, PackedStringArray(["on", "signal"]))
 	register_command("set_prop", factory_set_prop, PackedStringArray(["on", "prop", "value", "expr"]))
+	register_command("if", factory_if_block, PackedStringArray(["expr"]))
+	register_command("else", factory_else_block, PackedStringArray())
+	register_command("for_each", factory_for_each_block, PackedStringArray(["var", "in", "index"]))
 
 ## Registers the command `cmd_name`: `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from an element's attributes, and `attributes` are the
@@ -277,18 +281,29 @@ static func label_map(parsed: Array[Dictionary]) -> Dictionary:
 	return result
 
 ## Compiles a section's commands into callables, each through its registered
-## factory (a label is a no-op, so indices match the commands'). Its problems
-## (an unknown command or attribute, a goto or goto_if to a label the section
-## lacks) go through compile_error() and are counted in compile_errors; an
-## unknown command compiles to a no-op.
+## factory (a label is a no-op, so indices match the commands'). Blocks are
+## paired first (an <if> with its <else/> and end marker, a <for_each> with its
+## end marker), so their factories know where to jump; a block's end marker
+## compiles to its loop-back or a no-op. Its problems (an unknown command or
+## attribute, a goto or goto_if to a label the section lacks, an <else/>
+## outside an <if>) go through compile_error() and are counted in
+## compile_errors; an unknown command compiles to a no-op.
 func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 	compile_errors = 0
 	var section_labels := label_map(parsed)
 	var result : Array[Callable] = []
+	var blocks := _pair_blocks(parsed)
+	_block_links = blocks["links"]
+	var block_problems: Dictionary = blocks["problems"]
 
 	for cmd: Dictionary in parsed:
 		var cmd_name: String = cmd.get("name", "")
 		var args: Dictionary = cmd.get("args", {})
+		for problem: String in block_problems.get(result.size(), PackedStringArray()):
+			compile_error(problem)
+		if _BLOCK_ENDS.values().has(cmd_name) and not command_factories.has(cmd_name):
+			result.append(_compile_block_end(result.size()))
+			continue
 		if cmd_name == "label":
 			check_attributes(cmd_name, args, PackedStringArray(["name"]))
 			result.append(func() -> Variant: return null)
@@ -362,6 +377,7 @@ func cmd_goto(label: String) -> Callable:
 func jump(label: String) -> void:
 	if labels.has(label):
 		index = labels[label]
+		_leave_for_each_loops(index)
 	else:
 		run_error("no label \"%s\" in the section" % label)
 		
@@ -628,7 +644,9 @@ func parse_xml(path: String) -> Dictionary:
 
 ## Reads the file at `path` once (cached): section name -> its commands
 ## ({"name": element, "args": {attribute: value}}), the unnamed <sequence> under
-## "", in file order; its <trigger> goes to trigger_cache. A second section of
+## "", in file order, flat (a nested element is the next command); an <if> or a
+## <for_each> is followed, where it ends, by an end marker command (`end_if`,
+## `end_for_each`, no attributes); its <trigger> goes to trigger_cache. A second section of
 ## the same name is dropped as a problem (problem_cache). Empty for a file that
 ## cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
@@ -673,9 +691,13 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 					"name": node_name,
 					"args": arguments
 					})
+				if _BLOCK_ENDS.has(node_name) and parser.is_empty():
+					commands.append({"name": _BLOCK_ENDS[node_name], "args": {}})
 		elif parser.get_node_type() == XMLParser.NODE_ELEMENT_END:
 			if parser.get_node_name() == "sequence":
 				found_sequence = false
+			elif found_sequence and _BLOCK_ENDS.has(parser.get_node_name()):
+				commands.append({"name": _BLOCK_ENDS[parser.get_node_name()], "args": {}})
 	if result.is_empty():
 		problems.append("no section (no <sequence> element)")
 	xml_cache[path] = result
@@ -1141,3 +1163,181 @@ func factory_set_prop(args: Dictionary, _index: int) -> Callable:
 
 func factory_tween_move(args: Dictionary, _index: int) -> Callable:
 	return cmd_tween_move(str(args.get("x", 0)), str(args.get("y", 0)), str(args.get("duration", 0)))
+
+# Blocks: <if> / <else/> and <for_each>, with the end markers the reader adds.
+
+# The block elements the reader closes with an end marker: element -> marker.
+const _BLOCK_ENDS: Dictionary = {"if": "end_if", "for_each": "end_for_each"}
+
+# The for_each loops under way: the <for_each> command's index -> {"items" (the
+# snapshot), "at" (the round), "end" (its marker's index), "var", "index"}.
+# Cleared by start(); a goto out of a loop drops it (jump()).
+var _for_each_states: Dictionary = {}
+# While a section compiles: what _pair_blocks() found, command index -> its
+# partners, for the block factories.
+var _block_links: Dictionary = {}
+
+# Pairs a section's blocks with a stack: an <if> (the built-in one) with its
+# <else/> and end marker, a <for_each> with its end marker. {"links": index ->
+# {"else", "end"} for an opener, {"opener"} for an <else/>, {"opener", "kind"}
+# for a marker; "problems": index -> the problems found at that command}. A
+# block name a subclass registered itself is not paired: its markers do nothing.
+func _pair_blocks(parsed: Array[Dictionary]) -> Dictionary:
+	var links: Dictionary = {}
+	var problems: Dictionary = {}
+	var built_in: Dictionary = {
+		"if": command_factories.get("if", Callable()) == factory_if_block,
+		"for_each": command_factories.get("for_each", Callable()) == factory_for_each_block,
+	}
+	var else_built_in: bool = command_factories.get("else", Callable()) == factory_else_block
+	var open: Array[int] = []
+	for at: int in range(parsed.size()):
+		var cmd_name: String = parsed[at].get("name", "")
+		var top: int = open.back() if not open.is_empty() else -1
+		var top_name: String = parsed[top].get("name", "") if top >= 0 else ""
+		if built_in.get(cmd_name, false):
+			links[at] = {"else": -1, "end": -1}
+			open.append(at)
+		elif cmd_name == "else" and else_built_in:
+			if top_name != "if":
+				_block_problem(problems, at, "<else/> outside an <if>")
+			elif links[top]["else"] >= 0:
+				_block_problem(problems, at, "a second <else/> in one <if>")
+			else:
+				links[top]["else"] = at
+				links[at] = {"opener": top}
+		elif _BLOCK_ENDS.values().has(cmd_name) and not command_factories.has(cmd_name):
+			var opener_name: String = _BLOCK_ENDS.find_key(cmd_name)
+			if not built_in[opener_name]:
+				continue
+			if top_name == opener_name:
+				open.pop_back()
+				links[top]["end"] = at
+				links[at] = {"opener": top, "kind": opener_name}
+			else:
+				_block_problem(problems, at, "the end of an <%s> without its start" % opener_name)
+	for at: int in open:
+		_block_problem(problems, at, "<%s> without its end" % parsed[at].get("name", ""))
+	return {"links": links, "problems": problems}
+
+static func _block_problem(problems: Dictionary, at: int, message: String) -> void:
+	if not problems.has(at):
+		problems[at] = PackedStringArray()
+	var list: PackedStringArray = problems[at]
+	list.append(message)
+	problems[at] = list
+
+# An end marker's command: a built-in <for_each>'s loops back, any other does
+# nothing.
+func _compile_block_end(at: int) -> Callable:
+	var link: Dictionary = _block_links.get(at, {})
+	if link.get("kind", "") == "for_each":
+		return _cmd_end_for_each(link["opener"])
+	return func() -> Variant: return null
+
+# A goto landed on `to`: the loops whose body does not hold it are abandoned.
+func _leave_for_each_loops(to: int) -> void:
+	for at: int in _for_each_states.keys():
+		if to <= at or to > _for_each_states[at]["end"]:
+			_for_each_states.erase(at)
+
+# <if>: when `compiled` (null or broken: false) does not hold, goes on at
+# `skip_to` (after its <else/>, or after its end).
+func _cmd_if_block(compiled: CompiledExpr, skip_to: int) -> Callable:
+	return func() -> Variant:
+		var holds: bool = false
+		if compiled != null and compiled.ok:
+			var value: Variant = run_expr(compiled)
+			holds = true if value else false
+		if not holds:
+			index = skip_to
+		return null
+
+# <for_each>: snapshots what `source` resolves to and starts the first round,
+# or skips past `end` (an empty array; not an array: an error).
+func _cmd_for_each_block(var_name: String, source: String, index_name: String, at: int, end: int) -> Callable:
+	return func() -> Variant:
+		_for_each_states.erase(at)
+		var value: Variant = resolve_value(source)
+		var kind := typeof(value)
+		var items: Array = []
+		if kind == TYPE_ARRAY:
+			items = (value as Array).duplicate()
+		elif kind >= TYPE_PACKED_BYTE_ARRAY and kind <= TYPE_PACKED_VECTOR4_ARRAY:
+			for item: Variant in value:
+				items.append(item)
+		else:
+			run_error("for_each: \"%s\" is %s, not an array" % [source, type_string(kind)])
+			index = end + 1
+			return null
+		if items.is_empty():
+			index = end + 1
+			return null
+		var state: Dictionary = {"items": items, "at": 0, "end": end, "var": var_name, "index": index_name}
+		_for_each_states[at] = state
+		_for_each_round(state)
+		return null
+
+# A for_each's end marker: the next round from the top of the body, or on past
+# the loop after the last (or when the loop was abandoned or never entered).
+func _cmd_end_for_each(opener: int) -> Callable:
+	return func() -> Variant:
+		if not _for_each_states.has(opener):
+			return null
+		var state: Dictionary = _for_each_states[opener]
+		state["at"] += 1
+		if state["at"] >= (state["items"] as Array).size():
+			_for_each_states.erase(opener)
+			return null
+		_for_each_round(state)
+		index = opener + 1
+		return null
+
+# Sets a for_each round's variables: its element and (when named) its index.
+func _for_each_round(state: Dictionary) -> void:
+	var at: int = state["at"]
+	if state["var"] != "":
+		scratch_pad[state["var"]] = state["items"][at]
+	if state["index"] != "":
+		scratch_pad[state["index"]] = at
+
+## <if expr="...">: runs the commands up to its <else/> (or its end) when
+## `expr` (an expression, as set's) holds, else those after its <else/>. A
+## missing or malformed expr is a compile problem and reads as false.
+func factory_if_block(args: Dictionary, at: int) -> Callable:
+	var expr := str(args.get("expr", ""))
+	if expr == "":
+		compile_error("<if> needs expr")
+	var compiled := compile_command_expr("if", expr)
+	var link: Dictionary = _block_links.get(at, {})
+	var end: int = link.get("end", -1)
+	if end < 0:
+		return func() -> Variant: return null
+	var else_at: int = link.get("else", -1)
+	return _cmd_if_block(compiled, (else_at if else_at >= 0 else end) + 1)
+
+## <else/>: reached at the end of its <if>'s first part, goes on after the
+## <if>'s end. Outside an <if> it is a compile problem and does nothing.
+func factory_else_block(_args: Dictionary, at: int) -> Callable:
+	var link: Dictionary = _block_links.get(at, {})
+	var opener: Dictionary = _block_links.get(link.get("opener", -1), {})
+	var end: int = opener.get("end", -1)
+	if end < 0:
+		return func() -> Variant: return null
+	return func() -> Variant:
+		index = end + 1
+		return null
+
+## <for_each var="m" in="$list" index="i">: runs its body once per element of
+## a snapshot of the Array (or packed array) `in` resolves to, with `$m` the
+## element and `$i` (when named) its index from 0. An empty array skips the
+## body; something that is not an array is an error and skips it too.
+func factory_for_each_block(args: Dictionary, at: int) -> Callable:
+	var source := str(args.get("in", ""))
+	if source == "":
+		compile_error("<for_each> needs in")
+	var link: Dictionary = _block_links.get(at, {})
+	var end: int = link.get("end", -1)
+	if end < 0:
+		return func() -> Variant: return null
+	return _cmd_for_each_block(str(args.get("var", "")), source, str(args.get("index", "")), at, end)

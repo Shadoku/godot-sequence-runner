@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Blocks: <if> / <else/> / </if> and <for_each> / </for_each>, one section
+     per case. The host's record(n) keeps the numbers each run passes. -->
+<data>
+	<sequence name="if_else">
+		<if expr="$n > 2">
+			<call method="record" arg0="1" />
+		<else />
+			<call method="record" arg0="2" />
+		</if>
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="if_only">
+		<if expr="$flag">
+			<call method="record" arg0="1" />
+		</if>
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="loop">
+		<for_each var="m" in="$list" index="i">
+			<call method="record" arg0="$m" />
+			<call method="record" arg0="$i" />
+		</for_each>
+		<call method="record" arg0="9" />
+	</sequence>
+	<sequence name="nested_loops">
+		<for_each var="row" in="$rows">
+			<for_each var="cell" in="$row" index="i">
+				<call method="record" arg0="$cell" />
+			</for_each>
+			<call method="record" arg0="0" />
+		</for_each>
+	</sequence>
+	<sequence name="if_in_loop">
+		<for_each var="m" in="$list">
+			<if expr="$m > 1">
+				<call method="record" arg0="$m" />
+			<else />
+				<call method="record" arg0="0" />
+			</if>
+		</for_each>
+	</sequence>
+	<sequence name="loop_in_if">
+		<if expr="$go">
+			<for_each var="m" in="$list">
+				<call method="record" arg0="$m" />
+			</for_each>
+		<else />
+			<call method="record" arg0="-1" />
+		</if>
+		<call method="record" arg0="9" />
+	</sequence>
+	<sequence name="mutate">
+		<for_each var="m" in="$list">
+			<call method="drop_first" arg0="$list" />
+			<call method="record" arg0="$m" />
+		</for_each>
+	</sequence>
+	<sequence name="goto_out">
+		<set var="round" value="0" />
+		<label name="top" />
+		<set var="round" expr="$round + 1" />
+		<for_each var="m" in="$list">
+			<call method="record" arg0="$m" />
+			<goto_if label="out" var="$m" op="eq" value="2" />
+		</for_each>
+		<label name="out" />
+		<goto_if label="top" var="$round" op="lt" value="2" />
+		<call method="record" arg0="9" />
+	</sequence>
+	<sequence name="goto_in">
+		<set var="back" value="0" />
+		<for_each var="m" in="$list">
+			<label name="inside" />
+			<call method="record" arg0="$m" />
+			<goto_if label="out" var="$back" op="eq" value="0" />
+		</for_each>
+		<call method="record" arg0="9" />
+		<goto label="end" />
+		<label name="out" />
+		<set var="back" value="1" />
+		<goto label="inside" />
+		<label name="end" />
+	</sequence>
+	<sequence name="label_in_if">
+		<if expr="false">
+			<label name="in_if" />
+			<call method="record" arg0="1" />
+			<goto label="done" />
+		<else />
+			<call method="record" arg0="2" />
+		</if>
+		<goto label="in_if" />
+		<label name="done" />
+	</sequence>
+	<sequence name="next_round">
+		<for_each var="m" in="$list">
+			<goto_if label="next" var="$m" op="eq" value="2" />
+			<call method="record" arg0="$m" />
+			<label name="next" />
+		</for_each>
+	</sequence>
+	<sequence name="empty_blocks">
+		<if expr="true" />
+		<for_each var="m" in="$list" />
+		<if expr="false"></if>
+		<call method="record" arg0="9" />
+	</sequence>
+	<sequence name="resume">
+		<goto_if label="inside" var="$skip" op="eq" value="1" />
+		<for_each var="m" in="$list">
+			<label name="inside" />
+			<call method="ping" />
+			<wait_signal on="target" signal="fired" />
+		</for_each>
+	</sequence>
+</data>
