@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Features built apart, used together: blocks, stop_on_error, <stop/>,
+     max_instant_steps, <run> and start_and_wait(). $list is handed in. -->
+<data>
+	<sequence name="error_in_for_each">
+		<for_each var="m" in="$list">
+			<call method="record" arg0="$m" />
+			<call method="record" arg0="$missing" />
+		</for_each>
+		<call method="record" arg0="end" />
+	</sequence>
+	<sequence name="error_in_if">
+		<if expr="true">
+			<call method="record" arg0="$missing" />
+			<call method="record" arg0="2" />
+		</if>
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="error_in_if_expr">
+		<if expr="$missing > 0">
+			<call method="record" arg0="1" />
+		<else />
+			<call method="record" arg0="2" />
+		</if>
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="stop_in_for_each">
+		<for_each var="m" in="$list">
+			<call method="record" arg0="$m" />
+			<if expr="$m == 2">
+				<stop />
+			</if>
+		</for_each>
+		<call method="record" arg0="end" />
+	</sequence>
+	<sequence name="big_loop">
+		<for_each var="m" in="$list">
+			<call method="ping" />
+		</for_each>
+		<call method="record" arg0="end" />
+	</sequence>
+	<sequence name="run_big_loop">
+		<run section="big_loop" />
+		<call method="record" arg0="after" />
+	</sequence>
+	<sequence name="run_in_for_each">
+		<for_each var="m" in="$list" index="i">
+			<run section="round" var="got" />
+			<call method="record" arg0="$got" />
+		</for_each>
+		<call method="record" arg0="$m" />
+		<call method="record" arg0="$i" />
+	</sequence>
+	<sequence name="round">
+		<call method="note" arg0="$self" />
+		<call method="record" arg0="$m" />
+		<set var="result" expr="$m * 10" />
+		<set var="m" value="99" />
+		<set var="i" value="99" />
+	</sequence>
+	<sequence name="async_run_in_for_each">
+		<for_each var="m" in="$list">
+			<run section="round_waits" var="got" />
+			<call method="record" arg0="$got" />
+		</for_each>
+	</sequence>
+	<sequence name="round_waits">
+		<wait seconds="0.01" />
+		<set var="result" expr="$m * 10" />
+	</sequence>
+	<sequence name="run_child_loop">
+		<run section="child_loop" var="last" />
+		<call method="record" arg0="$last" />
+	</sequence>
+	<sequence name="child_loop">
+		<for_each var="m" in="$list">
+			<call method="record" arg0="$m" />
+		</for_each>
+		<set var="result" value="$m" />
+	</sequence>
+	<sequence name="nested_loops">
+		<for_each var="m" in="$list">
+			<run section="inner_loop" />
+		</for_each>
+	</sequence>
+	<sequence name="inner_loop">
+		<for_each var="k" in="$list">
+			<call method="record" arg0="$k" />
+		</for_each>
+	</sequence>
+	<sequence name="runs_ten">
+		<for_each var="m" in="$list">
+			<run section="ten_pings" />
+		</for_each>
+	</sequence>
+	<sequence name="ten_pings">
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="run_stop_in_for_each">
+		<run section="stop_in_for_each" />
+		<call method="record" arg0="after" />
+	</sequence>
+	<sequence name="run_error_in_for_each">
+		<run section="error_in_for_each" />
+		<call method="record" arg0="after" />
+	</sequence>
+</data>
