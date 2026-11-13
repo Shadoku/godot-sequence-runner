@@ -135,6 +135,11 @@ func _ready() -> void:
 ## such section (or cannot be read): nothing runs and sequence_finished is not
 ## emitted.
 func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
+	return _start_section(path, vars, section, true)
+
+# start()'s work; `use_trigger` false plays the section at once whatever the
+# file's <trigger> says (<run> and run_once()).
+func _start_section(path: String, vars: Dictionary, section: String, use_trigger: bool) -> bool:
 	if not _commands_registered:
 		register_commands()
 	xml_path = path if path != "" else xml_path
@@ -162,7 +167,7 @@ func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bo
 	_compile_section = section
 	_compile_problems = PackedStringArray()
 	sequence = compile_sequence(commands)
-	if trigger_config.size() > 0:
+	if use_trigger and trigger_config.size() > 0:
 		setup_trigger()
 	else:
 		run_sequence(sequence)
@@ -181,6 +186,58 @@ func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = 
 	if running:
 		await sequence_finished
 	return true
+
+## How deep `<run>` may nest sub-sequences (a section that runs itself...): the
+## runner a game starts is depth 0, its `<run>` child depth 1, and so on; a
+## `<run>` that would go deeper is a run-time error and runs nothing.
+const MAX_RUN_DEPTH: int = 32
+
+## A coroutine: plays the section `section` of the file at `path` on a
+## temporary runner (an instance of `runner_script`, a sequence_runner script;
+## null: sequence_runner) added as a child of `host`, which it targets. `vars`
+## seed its scratch pad, as start()'s do. The file's <trigger> is ignored: the
+## section plays at once. Waits until it ends, frees the runner and returns
+## true when it played to its end (a <stop/> counts), false when the section is
+## missing, the run `failed`, or `host` was freed or left the tree mid-run (the
+## runner is stopped; this then returns a frame later, outside the freeing).
+## One runner per call lets several sections play side by side.
+static func run_once(host: Node, path: String, vars: Dictionary = {}, section: String = "", runner_script: Script = null) -> bool:
+	if not is_instance_valid(host):
+		push_error("sequence_runner: run_once: no host")
+		return false
+	var made: Variant = runner_script.new() if runner_script != null else sequence_runner.new()
+	var runner := made as sequence_runner
+	if runner == null:
+		push_error("sequence_runner: run_once: %s is not a sequence_runner script" % runner_script.resource_path)
+		if made is Object and not made is RefCounted:
+			(made as Object).free()
+		return false
+	runner.target = host
+	host.add_child(runner)
+	var tree: SceneTree = runner.get_tree() if runner.is_inside_tree() else null
+	var host_gone: Array[bool] = [false]
+	runner.tree_exiting.connect(func() -> void:
+		host_gone[0] = true
+		runner.stop())
+	if not runner._start_section(path, vars, section, false):
+		runner.free()
+		return false
+	if not runner.running:
+		var instant_ok := not runner.failed
+		runner.free()
+		return instant_ok
+	await runner.sequence_finished
+	if host_gone[0]:
+		# Resumed from inside the host's freeing (or removal): return outside it.
+		if tree != null:
+			await tree.process_frame
+		if is_instance_valid(runner):
+			runner.free()
+		return false
+	var ok := not runner.failed
+	# Resumed while the runner emits sequence_finished: free it once that ends.
+	runner.queue_free()
+	return ok
 
 #sequence_runner.attach($node, "res://data/sequences/whatever.xml")
 ## `vars` seed the scratch pad and `section` picks the section when `auto` starts
@@ -224,6 +281,7 @@ func register_commands() -> void:
 	register_command("else", factory_else_block, PackedStringArray())
 	register_command("for_each", factory_for_each_block, PackedStringArray(["var", "in", "index"]))
 	register_command("stop", factory_stop, PackedStringArray())
+	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
 
 ## Registers the command `cmd_name`: `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from an element's attributes, and `attributes` are the
@@ -624,8 +682,9 @@ func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Call
 		return tween.finished
 
 ## Ends the running sequence: no further command runs (one waiting is
-## abandoned, a tween_move's tween killed), `running` turns false, `stopped`
-## true, and sequence_finished is emitted at once, as at the end, so a host
+## abandoned, a tween_move's tween killed, a playing `<run>` child stopped and
+## freed), `running` turns false, `stopped` true, and sequence_finished is
+## emitted at once, as at the end, so a host
 ## waiting on it never hangs. Does nothing when no sequence is running.
 func stop() -> void:
 	if not running:
@@ -633,6 +692,9 @@ func stop() -> void:
 	running = false
 	stopped = true
 	_run_id += 1
+	for child: sequence_runner in _run_children.duplicate():
+		if is_instance_valid(child):
+			child.stop()
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
 	_tween = null
@@ -1413,3 +1475,100 @@ func factory_stop(_args: Dictionary, _index: int) -> Callable:
 	return func() -> Variant:
 		stop()
 		return null
+
+# Sub-sequences: <run>.
+
+# How deep this runner is in a chain of <run>s (0: started by the game).
+var _run_depth: int = 0
+# The <run> children playing now: stop() stops them.
+var _run_children: Array[sequence_runner] = []
+
+## <run section="..." file="..." var="...">: plays the section `section` ("":
+## the unnamed one) of `file` (default: the playing file) on a child runner
+## and waits until it ends (see _cmd_run_section()). When neither `file` nor
+## `section` is a `$` reference and the file can be read, a section it lacks
+## is a compile problem; otherwise it is found out at run time.
+func factory_run_section(args: Dictionary, _index: int) -> Callable:
+	var file := str(args.get("file", ""))
+	var section := str(args.get("section", ""))
+	var var_name := str(args.get("var", ""))
+	if not file.begins_with("$") and not section.begins_with("$"):
+		var path := file if file != "" else _compile_path
+		if path != "" and FileAccess.file_exists(path) and not read_sections(path, _quiet).has(section):
+			compile_error("<run>: %s has no section \"%s\"" % [path, section])
+	return _cmd_run_section(file, section, var_name)
+
+# <run>: resolves the file and section, then plays the section on a child
+# runner: an instance of this runner's own script, added as its child, with
+# its target, rng, verbose, stop_on_error and max_instant_steps, one level
+# deeper, and a shallow copy of the scratch pad without `result`. The file's
+# <trigger> is ignored. Instant when the child ends inside its start, async
+# otherwise (the loop waits for it). A section the file lacks, or a run deeper
+# than MAX_RUN_DEPTH, is a run-time error and nothing runs.
+func _cmd_run_section(file_token: String, section_token: String, var_name: String) -> Callable:
+	return func() -> Variant:
+		var path: Variant = xml_path if file_token == "" else resolve_value(file_token)
+		var section: Variant = resolve_value(section_token)
+		if failed:
+			return null
+		if path == null or section == null:
+			run_error("run: cannot resolve the file and/or the section: \"%s\" \"%s\"" % [file_token, section_token])
+			return null
+		var run_path := str(path)
+		var run_section := str(section)
+		if _run_depth >= MAX_RUN_DEPTH:
+			run_error("run: more than %d nested sub-sequences (MAX_RUN_DEPTH); %s:%s is not run" % [MAX_RUN_DEPTH, run_path, run_section])
+			return null
+		if not read_sections(run_path).has(run_section):
+			run_error("run: %s has no section \"%s\"" % [run_path, run_section])
+			return null
+		var child := (get_script() as Script).new() as sequence_runner
+		child.target = target
+		child.rng = rng
+		child.verbose = verbose
+		child.stop_on_error = stop_on_error
+		child.max_instant_steps = max_instant_steps
+		child._run_depth = _run_depth + 1
+		add_child(child)
+		var vars: Dictionary = scratch_pad.duplicate()
+		vars.erase("result")
+		if verbose:
+			print("Running: %s:%s" % [run_path, run_section])
+		_run_children.append(child)
+		var run_id := _run_id
+		if not child._start_section(run_path, vars, run_section, false):
+			_run_children.erase(child)
+			child.free()
+			return null
+		if not child.running:
+			_end_run_child(child, var_name, run_id, true)
+			return null
+		# callv() hands back the coroutine's state (as call's methods do).
+		var state: Object = callv("_await_run_child", [child, var_name, run_id])
+		return Signal(state, "completed")
+
+# Waits for an async <run> child to end, then _end_run_child().
+func _await_run_child(child: sequence_runner, var_name: String, run_id: int) -> void:
+	await child.sequence_finished
+	_end_run_child(child, var_name, run_id, false)
+
+# A <run> child ended: it is freed (at once when it ended inside its start,
+# else once its sequence_finished is over). If this runner still plays the
+# same run, a failed child fails it when stop_on_error is on (run_error());
+# otherwise `var_name` gets the child's $result (null when it set none).
+func _end_run_child(child: sequence_runner, var_name: String, run_id: int, instant: bool) -> void:
+	_run_children.erase(child)
+	var result: Variant = child.scratch_pad.get("result")
+	var child_failed: bool = child.failed
+	var where := "%s:%s" % [child.xml_path, child.current_section]
+	if instant:
+		child.free()
+	else:
+		child.queue_free()
+	if run_id != _run_id or not running:
+		return
+	if child_failed and stop_on_error:
+		run_error("run: the sub-sequence %s failed" % where)
+		return
+	if var_name != "":
+		scratch_pad[var_name] = result

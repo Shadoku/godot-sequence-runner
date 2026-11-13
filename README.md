@@ -45,7 +45,7 @@ if await runner.start_and_wait("res://data/cards/fireball.xml", {"caster": caste
 
 A file whose `<trigger>` defers the start (`signal`, `timer`) is not waited for: `start_and_wait()` returns `true` at once and the sequence plays when its trigger fires.
 
-**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<stop />` (or `<call on="self" method="stop" />`); `failed` stays `false`.
+**Stop a sequence:** `stop()` ends the running sequence: no further command runs (a `wait`, `wait_signal` or `call await` it was waiting on is abandoned, a `tween_move`'s tween is killed, a [`<run>`](#sub-sequences) child is stopped and freed), `running` turns `false` and `stopped` `true`, and `sequence_finished` is emitted at once, as at the end, so code waiting on it never hangs. It does nothing when no sequence runs; `start()` clears `stopped`. A sequence can stop itself with `<stop />` (or `<call on="self" method="stop" />`); `failed` stays `false`.
 
 ```gdscript
 runner.start("res://data/sequences/patrol.xml")   # loops forever
@@ -132,6 +132,7 @@ A section the file lacks makes `start()` return `false` with an error; nothing r
 | `pause` | `time` | Pause the scene tree (optionally for a duration) |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
+| `run` | `section`, `file` (optional), `var` (optional) | Play a section (of `file`, default the playing file) on a child runner and wait for it; `var` gets its `$result` (see [Sub-sequences](#sub-sequences)) |
 
 ### Variables
 
@@ -322,6 +323,49 @@ An operand that cannot be resolved is an error, and nothing jumps.
 **How it is read.** The reader stays flat: only `<if>` and `<for_each>` get an extra end marker command (`end_if`, `end_for_each`) where they end (at once when self-closed, `<if expr="..." />` being an empty block). Every other element reads as before, nested or not: `<wait seconds="1"></wait>` is one `wait`, and an element nested in another is simply the next command. The compiler pairs `<if>`, `<else/>` and the markers with a stack. The marker names `end_if` and `end_for_each` are therefore taken; do not write them as elements.
 
 **A subclass's own `if` or `for_each`.** A subclass that registers a command named `if` or `for_each` (after `super.register_commands()`) keeps it: its factory builds the command as any other, and that name's end markers compile to no-ops without a compile problem. `<else/>` stays the built-in one, so with a subclass's own `if` it is reported as outside an `<if>` unless the subclass registers `else` too.
+
+### Sub-sequences
+
+`<run>` plays another section as a sub-sequence and waits until it ends, so sections can share steps (one section per card hook, a common "deal damage" section they all run):
+
+```xml
+<sequence name="on_play">
+  <run section="deal_damage" var="dealt" />
+  <run file="res://data/cards/common.xml" section="draw_one" />
+  <call on="log" method="add" arg0="$dealt" />
+</sequence>
+<sequence name="deal_damage">
+  <call on="target_card" method="take_damage" arg0="$amount" var="result" />
+</sequence>
+```
+
+**`<run section="..." file="..." var="..." />`** plays the section `section` (`""` or left out: the unnamed `<sequence>`) of the file `file` (left out: the playing file) on a child runner:
+
+- The child is an instance of the caller's own script (`get_script().new()`), so a subclass's commands work in it, added as the caller's child, with the caller's `target`, `rng`, `verbose`, `stop_on_error` and `max_instant_steps`.
+- It starts with a shallow copy of the caller's scratch pad: it reads the caller's variables, and objects, dictionaries and arrays are shared (a `set_prop` or a `call` on one changes what the caller sees), but its own `set`s do not leak back. `$result` is left out of the copy: the child starts without one.
+- `var` (optional) stores the child's `$result` variable in the caller's scratch pad when it ends; `null` when the child set none.
+- The file's `<trigger>` is ignored: the section plays at once. (A plain `start()` on that file still follows its trigger.)
+- `<run>` is instant when the child ends inside its start (a section of instant commands: no frame passes, and a caller made of instant commands still finishes inside `start()`), and async otherwise: the caller waits for the child, as for a `wait`.
+- The child is freed when it ends. A `<stop/>` in the child ends the child only; the caller goes on.
+- `file` and `section` are tokens: `file="$card_file" section="$hook"` resolves them when the command runs.
+
+**Errors.** A section the file lacks is a compile problem (`validate()` lists it) when `file` is left out or is a literal path to a file that can be read; when `file` or `section` is a `$` reference, or the file cannot be read, it is a run-time error, and nothing runs. With `stop_on_error` on, an operand that cannot be resolved stops the caller before any child is made.
+
+**Failing and stopping.** A child that `failed` (a run-time error with `stop_on_error` on, or `max_instant_steps`) makes the caller fail too when the caller's `stop_on_error` is on: a run-time error naming the sub-sequence is reported, `failed` turns `true` and the caller stops (its `var` is not written). With `stop_on_error` off the caller carries on after it. `stop()` on the caller stops its running child (and so on down), which is then freed.
+
+**Depth.** Runs nest: a child may `<run>` too. `MAX_RUN_DEPTH` (32) caps the nesting: the runner the game starts is depth 0, its child depth 1; a `<run>` that would go past 32 is a run-time error and runs nothing, so a section that runs itself forever ends with an error instead of a crash. Each child counts its own `max_instant_steps` (given the caller's limit), so the depth cap, not the step cap, ends an instant section that runs itself.
+
+**Shared caches.** Parsed files, label maps and triggers are cached per file for every runner; a child playing another section of the same file has its own `labels`, `sequence`, `index` and `current_section`, and leaves the caller's alone.
+
+**From code: `run_once()`.** `sequence_runner.run_once(host, path, vars := {}, section := "", runner_script: Script = null) -> bool` is a static coroutine: it attaches a temporary runner (an instance of `runner_script`, `sequence_runner` when null) to `host`, which it targets, plays the section with `vars` seeding its scratch pad (the file's `<trigger>` ignored), waits until it ends, frees the runner and returns `true` when it played to its end (a `<stop/>` counts) and `false` when the section is missing or the run `failed`. One runner per call is what lets a card's trigger play while another effect is still resolving:
+
+```gdscript
+var strict := preload("res://game/strict_runner.gd")   # a subclass with stop_on_error on, say
+if not await sequence_runner.run_once(card, "res://data/cards/fireball.xml", {"target": enemy}, "on_play", strict):
+    pass  # missing section, or an error cut the effect short
+```
+
+If `host` is freed (or leaves the tree) while the section plays, the runner is stopped (and freed, with the host or by `run_once()`), and `run_once()` returns `false` one frame later, outside the freeing. It is named `run_once` because a known subclass already has a static `play()`.
 
 ### Calling Methods
 
@@ -514,9 +558,9 @@ A factory put straight into `command_factories` (`command_factories["scale"] = f
 
 Every problem is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
 
-**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, an `expr` that does not parse, an `<if>` without `expr`, a `<for_each>` without `in`, an `<else/>` outside an `<if>` or a second one in the same `<if>`, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
+**Compile problems** are found when a section is compiled (by `start()`, or by `validate()`): an unknown command, an unknown attribute of a known command, a `goto` or `goto_if` to a label the section lacks, an `expr` that does not parse, an `<if>` without `expr`, a `<for_each>` without `in`, an `<else/>` outside an `<if>` or a second one in the same `<if>`, a `<run>` to a section its (literal or left out) file lacks, what a factory reports with `compile_error()`; and in the file itself, a second section of the same name or no section at all. `start()` pushes each one as an error, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A section `start()` is asked for and the file lacks is an error too, and nothing runs.
 
-**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero), a `<for_each>` whose `in` is not an array.
+**Run-time problems** are errors pushed while the sequence plays, and the sequence carries on: an unresolvable variable or path, a missing object, method, signal or dictionary key, a `goto_if` operand it cannot compare, an expression that fails (an unknown function, a division by zero), a `<for_each>` whose `in` is not an array, a `<run>` to a missing section or past `MAX_RUN_DEPTH`, a `<run>` child that failed (only with `stop_on_error` on, see [Sub-sequences](#sub-sequences)).
 
 **Stopping at the first run-time error.** With `stop_on_error = true` (an export, `false` by default), the first run-time error sets `failed = true` and stops the sequence as `stop()` does: `running` turns `false`, `stopped` `true`, and `sequence_finished` is emitted once. The command that met the error has no side effect after it: a built-in command checks for the error after resolving its operands and before acting, so `call` does not call the method (nor store `var`), `set` and `set_prop` do not write, `move` and `tween_move` do not move, `goto_if` does not jump, `pause` does not pause, `wait` and `wait_signal` do not wait. An error reported while the sequence waits (by game code calling `evaluate_expr()`, say) stops it too, and the wait is abandoned. `start()` clears `failed`. Errors pushed outside `run_error()` (a compile problem, a missing file or section, `to_float()`'s "not a number") do not set it.
 
@@ -555,7 +599,7 @@ runner.free()
 
 ## Architecture
 
-The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one flat list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`; an `<if>` or `<for_each>` is followed where it ends by an end marker command, `end_if` or `end_for_each`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions (blocks are paired first, so an `<if>`, its `<else/>` and a `<for_each>` know the index to jump to, and a `<for_each>`'s end marker jumps back), then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it); the state of the `<for_each>` loops under way is kept apart from it, per `<for_each>` command, and also reset by `start()`. Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are.
+The pipeline is **Parse → Compile → Run**. XML is parsed into dictionaries, one flat list per section (`read_sections(path)`: section name → its commands, the unnamed one under `""`; an `<if>` or `<for_each>` is followed where it ends by an end marker command, `end_if` or `end_for_each`), and the section `start()` names is compiled into an `Array[Callable]` via factory functions (blocks are paired first, so an `<if>`, its `<else/>` and a `<for_each>` know the index to jump to, and a `<for_each>`'s end marker jumps back), then executed sequentially (`run_sequence()`: an async command's signal resumes the loop through the runner's own `_resumed`, tagged with the run, so `stop()` can end a waiting run at once). Expressions (`expr`) are compiled with their section (`compile_expr()`: the `$` references become the inputs of a Godot `Expression`, parsed once) and executed per run (`run_expr()`). Labels are pre-scanned per section (`label_map()`) and stored separately from the command array as index pointers (`labels`, and `label_cache[path][section]`). Parsed XML, label maps, and trigger configs are all statically cached so multiple runners sharing a file do no redundant work. Runtime state lives in a per-run `scratch_pad` dictionary that resets on each `start()` call (then takes the `vars` passed to it); the state of the `<for_each>` loops under way is kept apart from it, per `<for_each>` command, and also reset by `start()`. Targets resolved from `/root/` (by `call`, `wait_signal` or a property path) are also cached in the scratch pad to avoid repeated lookups; named objects are read from it as they are. A `<run>` plays its section on a child runner (`_start_section()` with the trigger ignored) and, when the child does not end inside its start, hands the loop the `completed` signal of a coroutine that waits for the child's `sequence_finished`, stores `var` and frees the child.
 
 ## What's new
 
@@ -572,6 +616,10 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<if expr>`, `<else />`, `<for_each var in index>` | commands | [Blocks](#blocks) |
 | `end_if`, `end_for_each` | command names the reader adds after `<if>` and `<for_each>` (only those two elements) | [Blocks](#blocks) |
 | `factory_if_block()`, `factory_else_block()`, `factory_for_each_block()` | methods (the block commands' factories) | [Blocks](#blocks) |
+| `<run section file var />` | command | [Sub-sequences](#sub-sequences) |
+| `factory_run_section(args, index) -> Callable` | method (the `run` command's factory) | [Sub-sequences](#sub-sequences) |
+| `MAX_RUN_DEPTH` | constant (int, `32`) | [Sub-sequences](#sub-sequences) |
+| `run_once(host, path, vars, section, runner_script) -> bool` | static method (coroutine) | [Sub-sequences](#sub-sequences) |
 
 Without a new name:
 

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <run>: each caller section plays another section on a child runner. The
+     child sections ("two", "waits", "writes"...) are what the callers run. -->
+<data>
+	<sequence name="instant">
+		<call method="record" arg0="1" />
+		<run section="two" />
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="two">
+		<call method="record" arg0="2" />
+	</sequence>
+	<sequence name="other_file">
+		<run file="res://fixtures/sequences/run_other.xml" section="other" />
+		<call method="record" arg0="6" />
+	</sequence>
+	<sequence name="async">
+		<call method="record" arg0="1" />
+		<run section="waits" />
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="waits">
+		<wait seconds="0.02" />
+		<call method="record" arg0="2" />
+	</sequence>
+	<sequence name="calls_stops">
+		<run section="stops" />
+		<call method="record" arg0="1" />
+	</sequence>
+	<sequence name="stops">
+		<stop />
+		<call method="record" arg0="2" />
+	</sequence>
+	<sequence name="shallow">
+		<set var="n" value="1" />
+		<run section="writes" />
+		<call method="record" arg0="$n" />
+	</sequence>
+	<sequence name="writes">
+		<call method="record" arg0="$n" />
+		<set var="n" value="2" />
+		<set_prop on="shared" prop="hp" value="5" />
+		<set_prop on="target" prop="score" value="7" />
+	</sequence>
+	<sequence name="results">
+		<set var="n" value="3" />
+		<run section="doubles" var="out" />
+		<set var="result" value="7" />
+		<run section="no_result" var="none" />
+	</sequence>
+	<sequence name="doubles">
+		<set var="result" expr="$n * 2" />
+	</sequence>
+	<sequence name="no_result">
+		<set var="x" value="1" />
+	</sequence>
+	<sequence name="trigger_caller">
+		<run file="res://fixtures/sequences/run_trigger.xml" />
+	</sequence>
+	<sequence name="keeps_state">
+		<set var="i" value="0" />
+		<label name="again" />
+		<run section="labelled" />
+		<set var="i" expr="$i + 1" />
+		<goto_if label="again" var="i" op="lt" value="2" />
+		<call method="record" arg0="$i" />
+	</sequence>
+	<sequence name="labelled">
+		<label name="spare" />
+		<label name="again" />
+		<wait seconds="0.01" />
+	</sequence>
+	<sequence name="dynamic">
+		<run file="$f" section="$s" />
+	</sequence>
+	<sequence name="notes">
+		<run section="note" />
+	</sequence>
+	<sequence name="note">
+		<call method="note_runner" arg0="$self" />
+	</sequence>
+	<sequence name="calls_failing">
+		<run section="fails" />
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="fails">
+		<call method="record" arg0="$missing" />
+		<call method="record" arg0="2" />
+	</sequence>
+	<sequence name="calls_spin">
+		<run section="spin" />
+		<call method="record" arg0="3" />
+	</sequence>
+	<sequence name="spin">
+		<label name="spin" />
+		<goto label="spin" />
+	</sequence>
+	<sequence name="recurse">
+		<call method="ping" />
+		<run section="recurse" />
+	</sequence>
+	<sequence name="missing_at_run">
+		<run section="$name" />
+		<call method="record" arg0="1" />
+	</sequence>
+	<sequence name="bad_operand">
+		<run file="$missing" section="two" />
+		<call method="record" arg0="1" />
+	</sequence>
+</data>

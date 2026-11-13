@@ -1,7 +1,7 @@
 # Plan: additions for scripted card games
 
-Status: agreed 2026-11-13. Step 0 is done (the regression suite and the check);
-steps 1 to 6 are open. Update the status line and tick the steps as they land.
+Status: agreed 2026-11-13. Steps 0 to 5 are done; step 6 (docs) was written with
+each feature (a README section per feature and the "What's new" table).
 
 ## Why
 

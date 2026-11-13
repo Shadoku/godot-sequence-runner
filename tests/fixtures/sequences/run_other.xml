@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <run file="...">: the section run.xml's "other_file" plays from another file. -->
+<data>
+	<sequence name="other">
+		<call method="record" arg0="5" />
+	</sequence>
+</data>
