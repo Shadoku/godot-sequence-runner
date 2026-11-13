@@ -21,6 +21,11 @@ static var problem_cache: Dictionary = {}
 ## Stop the sequence at its first run-time error (run_error()) and set `failed`.
 ## Off: a run-time error is reported and the sequence carries on.
 @export var stop_on_error: bool = false
+## The most commands a sequence may run without waiting (an async command)
+## before it is stopped with an error and `failed`, whatever stop_on_error
+## says: a loop that never waits would hang the game. The count restarts each
+## time the sequence waits. 0: no limit.
+@export var max_instant_steps: int = 100000
 
 var target: Node = null
 var sequence: Array[Callable] = []
@@ -48,7 +53,7 @@ var trigger_config: Dictionary = {}
 ## Whether the last sequence was cut by stop() rather than played to its end.
 var stopped: bool = false
 ## Whether the last sequence was stopped by a run-time error (with
-## stop_on_error on). start() clears it.
+## stop_on_error on) or by max_instant_steps. start() clears it.
 var failed: bool = false
 
 var _commands_registered: bool = false
@@ -630,8 +635,16 @@ func run_sequence(commands: Array[Callable]) -> void:
 	sequence = commands
 	_run_id += 1
 	var run_id := _run_id
+	# Commands run since the loop last waited (max_instant_steps).
+	var instant_steps: int = 0
 
 	while running && index < sequence.size():
+		if max_instant_steps > 0 and instant_steps >= max_instant_steps:
+			push_error("sequence_runner: %s:%s: more than %d commands without waiting (max_instant_steps); the sequence is stopped" % [xml_path, current_section, max_instant_steps])
+			failed = true
+			stop()
+			return
+		instant_steps += 1
 		var current: Callable = sequence[index]
 		index = index + 1
 		#print("running command: ", index, " : ", current)
@@ -648,6 +661,7 @@ func run_sequence(commands: Array[Callable]) -> void:
 				await _resumed
 				if run_id != _run_id:
 					return
+				instant_steps = 0
 		else:
 			run_error("invalid command at %d" % (index - 1))
 

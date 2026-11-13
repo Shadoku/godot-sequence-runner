@@ -62,6 +62,7 @@ runner.stop()
 | `target_self` | bool | `false` | Target the runner node instead of its parent |
 | `verbose` | bool | `false` | Print debug output: the chosen target (`Targeting parent` / `Targeting self`) and each `goto` jump (`Jumping to: ...`) |
 | `stop_on_error` | bool | `false` | Stop the sequence at its first run-time error and set `failed` (see [Errors and Validation](#errors-and-validation)); off, it carries on |
+| `max_instant_steps` | int | `100000` | The most commands a sequence may run without waiting before it is stopped with an error and `failed`; `0`: no limit (see [Errors and Validation](#errors-and-validation)) |
 
 ## XML Format
 
@@ -471,6 +472,12 @@ Every problem is reported with `push_error`, so it shows as an `ERROR:` line (an
 
 **Stopping at the first run-time error.** With `stop_on_error = true` (an export, `false` by default), the first run-time error sets `failed = true` and stops the sequence as `stop()` does: `running` turns `false`, `stopped` `true`, and `sequence_finished` is emitted once. The command that met the error has no side effect after it: a built-in command checks for the error after resolving its operands and before acting, so `call` does not call the method (nor store `var`), `set` and `set_prop` do not write, `move` and `tween_move` do not move, `goto_if` does not jump, `pause` does not pause, `wait` and `wait_signal` do not wait. An error reported while the sequence waits (by game code calling `evaluate_expr()`, say) stops it too, and the wait is abandoned. `start()` clears `failed`. Errors pushed outside `run_error()` (a compile problem, a missing file or section, `to_float()`'s "not a number") do not set it.
 
+**A loop that never waits.** `max_instant_steps` (an export, `100000` by default) caps how many commands a sequence runs without waiting. A command that returns a signal (`wait`, `tween_move`, `wait_signal`, `call await`) makes the loop wait, and the count restarts after it; the waiting command itself counts before it waits. Past the cap, before the next command runs, an error naming the file, section and cap is pushed, `failed` turns `true` and the sequence stops as `stop()` does, whatever `stop_on_error` says, so a `goto` loop that forgot its `wait` stops instead of freezing the game. A chain hand-over (`start()` from inside the sequence) does not wait, so the count carries on into the new sequence. `0` disables the cap.
+
+```
+ERROR: sequence_runner: res://data/sequences/patrol.xml:: more than 100000 commands without waiting (max_instant_steps); the sequence is stopped
+```
+
 ```gdscript
 runner.stop_on_error = true
 await runner.start_and_wait("res://data/cards/fireball.xml", {"target": card}, "on_play")
@@ -512,6 +519,7 @@ Every public name added since the regression suite, so a subclass can check it d
 | `stop_on_error` | export (bool, default `false`) | [Errors and Validation](#errors-and-validation) |
 | `failed` | member (bool) | [Errors and Validation](#errors-and-validation) |
 | `<stop />` | command | [Commands](#commands) |
+| `max_instant_steps` | export (int, default `100000`) | [Errors and Validation](#errors-and-validation) |
 | `factory_stop(args, index) -> Callable` | method (the `stop` command's factory) | [Extending](#extending) |
 
 ## Development

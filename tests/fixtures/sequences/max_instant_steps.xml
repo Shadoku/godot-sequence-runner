@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- max_instant_steps: "spin" loops without ever waiting (it would hang the
+     game); "five" is five instant commands; "counted" runs 401 instant
+     commands and ends; "chunks" runs 4, 4 and 3 commands with a wait between. -->
+<data>
+	<sequence name="spin">
+		<label name="spin" />
+		<goto label="spin" />
+	</sequence>
+	<sequence name="five">
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="counted">
+		<set var="i" value="0" />
+		<label name="loop" />
+		<set var="i" expr="$i + 1" />
+		<goto_if label="loop" var="i" op="lt" value="200" />
+	</sequence>
+	<sequence name="chunks">
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<wait seconds="0" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+		<wait seconds="0" />
+		<call method="ping" />
+		<call method="ping" />
+		<call method="ping" />
+	</sequence>
+</data>
