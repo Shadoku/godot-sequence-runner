@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An object handed in as $body: called by name (with and without the $),
+     read by path, waited on; then the target is pinged. -->
+<data>
+	<sequence>
+		<call on="body" method="ping" />
+		<call on="$body" method="record" arg0="$body.radius" />
+		<wait_signal on="body" signal="fired" />
+		<call method="ping" />
+	</sequence>
+</data>

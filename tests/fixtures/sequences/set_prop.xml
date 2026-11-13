@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- set_prop on a property ($body.radius), a dictionary key read and written
+     (props.health), a key created (props.armor), a Vector2 component of the
+     target (position.x) and a scratch-pad dictionary ($stats.bonus). -->
+<data>
+	<sequence>
+		<set_prop on="body" prop="radius" value="9" />
+		<set_prop on="piece" prop="props.health" expr="$piece.props.health - 1" />
+		<set_prop on="piece" prop="props.armor" value="2" />
+		<set_prop prop="position.x" value="12.5" />
+		<set_prop on="stats" prop="bonus" value="4" />
+	</sequence>
+</data>

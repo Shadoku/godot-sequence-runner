@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Free-form expressions (Godot's Expression): precedence and parentheses,
+     functions, a path and a method call on a seeded object, the number rule
+     (an int, a bool or a numeric string reads as a float), strings, a ternary,
+     a comparison into a variable and goto_if on it, a two-term set_prop;
+     `random`: random_int() inside an expression; `errors`: each failure an
+     error that reads as 0, the sequence going on. -->
+<data>
+	<sequence>
+		<set var="p" expr="($a + $b) * 2" />
+		<set var="q" expr="$a + $b * 2" />
+		<set var="r" expr="$a+1" />
+		<set var="s" expr="abs(-$a) + clamp($b, 0, 1) + min($a, $b)" />
+		<set var="t" expr="$body.global_position.x + 1" />
+		<set var="u" expr="$flag + 1" />
+		<set var="v" expr="$period / 2" />
+		<set var="w" expr="$i + 1" />
+		<set var="x" expr="$text + '!'" />
+		<set var="y" expr="'big' if $a > 2 else 'small'" />
+		<set var="z" expr="$body.get_class()" />
+		<set var="seven" expr="$num" />
+		<set var="hot" expr="$element == 'fire'" />
+		<goto_if label="hot" var="$hot" op="eq" value="true" />
+		<call on="target" method="ping" />
+		<label name="hot" />
+		<set_prop on="piece" prop="props.health" expr="$piece.props.health - $piece.props.step" />
+	</sequence>
+	<sequence name="random">
+		<set var="roll" expr="random_int(1, 6) * 10 + random_int(1, 6)" />
+		<call on="target" method="record" arg0="$roll" />
+		<set var="roll" expr="random_int(1, 6) * 10 + random_int(1, 6)" />
+		<call on="target" method="record" arg0="$roll" />
+	</sequence>
+	<sequence name="errors">
+		<set var="d" value="1" />
+		<set var="d" expr="$a / 0" />
+		<set var="e" value="1" />
+		<set var="e" expr="7 / 0" />
+		<set var="f" value="1" />
+		<set var="f" expr="'a' + 1" />
+		<set var="g" value="1" />
+		<set var="g" expr="nothing(1)" />
+		<set var="h" value="1" />
+		<set var="h" expr="Vector2(1, 2).nothing" />
+		<set var="k" expr="$ghost + 1" />
+		<call on="target" method="ping" />
+	</sequence>
+</data>

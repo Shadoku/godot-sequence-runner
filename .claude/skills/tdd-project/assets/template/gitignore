@@ -1,0 +1,9 @@
+# tools/check.py's per-checkout state (shard times)
+.check/
+
+# OS / tooling
+.DS_Store
+Thumbs.db
+
+# Claude Code agent worktrees
+.claude/worktrees/

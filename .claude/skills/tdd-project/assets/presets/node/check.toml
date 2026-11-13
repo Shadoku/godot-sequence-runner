@@ -1,0 +1,57 @@
+# check.toml: what `python3 tools/check.py` runs. Stages run in this order.
+#
+# Keys of a [[stage]]:
+#   name          what the report calls it
+#   run           the shell command (run from the project root); exit code 0 = pass
+#   tier          "quick" (also part of --tier quick) or "full" (the default)
+#   filter        the command for `--filter NAME`, with {filter} where the name goes;
+#                 stages without it are left out of a filtered run
+#   no_match_exit exit codes of `filter` that mean "no test matches" (not a failure,
+#                 as long as another stage matched)
+#   filter_match  for a runner that exits 0 when nothing matches: a regex its output
+#                 matches only when a test ran
+#   summary       a regex; the runner's line(s) it matches are shown under a pass
+#                 (the last four)
+#   parallel      true: runs side by side with the parallel stages next to it
+#   stop_on_fail  true: when it fails the later stages are skipped (a build, a compile)
+#   files         glob(s) of test files; with {files} in `run` (and `filter`) the stage is
+#                 split over several processes by file, for a runner that has no
+#                 parallelism of its own. max_processes caps how many.
+#   env           environment variables for the command
+#   timeout       seconds (default 600); tail: lines of output shown on failure (60)
+#   needs         executables the stage needs; if_missing = "skip" skips it without them
+#                 (the default fails)
+# {jobs} in a command is the number of parallel jobs.
+#
+# Quick stages are the inner loop: keep their total under [budget].quick seconds, or
+# nobody will run them. Everything that needs a build, a browser, a database, a network
+# or real time belongs in the full tier.
+
+[budget]
+quick = 10
+full = 120
+
+[cache]
+tools = ["node --version"]
+env = []
+
+[[stage]]
+name = "unit"
+# node --test runs each file in its own process, several at a time.
+run = 'node --test "tests/unit/**/*.test.js"'
+filter = 'node --test --test-name-pattern={filter} "tests/unit/**/*.test.js"'
+summary = '^[#ℹ] (tests|pass|fail) \d+$'
+tier = "quick"
+parallel = true
+
+[[stage]]
+name = "integration"
+run = 'node --test "tests/integration/**/*.test.js"'
+filter = 'node --test --test-name-pattern={filter} "tests/integration/**/*.test.js"'
+summary = '^[#ℹ] (tests|pass|fail) \d+$'
+parallel = true
+
+# Once the project has them, put a type check or linter first, in the quick tier:
+#   [[stage]] name = "types", run = "npx tsc --noEmit", tier = "quick", stop_on_fail = true
+# and, with dependencies, an install stage before everything (commit package-lock.json):
+#   [[stage]] name = "install", run = "npm ci --prefer-offline --no-audit", tier = "quick", stop_on_fail = true

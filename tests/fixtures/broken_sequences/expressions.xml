@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Expressions that do not parse: compile problems validate() lists. -->
+<data>
+	<sequence>
+		<set var="a" expr="1 +" />
+		<call on="target" method="ping" />
+		<set_prop prop="position.x" expr="($a" />
+	</sequence>
+</data>

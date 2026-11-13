@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<play_anim anim="idle" />
+		<play_anim anim="blink" node_path="Visuals/Eyes" />
+	</sequence>
+</data>

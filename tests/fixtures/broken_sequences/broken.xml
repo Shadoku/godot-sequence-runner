@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Compile problems validate() must list (tests/unit/test_sequence_runner.gd):
+     an unknown command, an unknown attribute, a goto to a label its section
+     lacks (the other section's label does not count), a second section of one
+     name. The call with arguments, var and await is sound. -->
+<data>
+	<sequence>
+		<cal method="ping" />
+		<set var="y" valu="1" />
+		<call method="record" arg0="1" var="x" await="true" />
+		<label name="end" />
+	</sequence>
+	<sequence name="loop">
+		<goto label="end" />
+		<goto_if label="done" var="1" op="eq" value="1" />
+		<label name="done" />
+	</sequence>
+	<sequence name="loop">
+		<call method="ping" />
+	</sequence>
+</data>

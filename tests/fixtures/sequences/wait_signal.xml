@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<wait_signal on="target" signal="drop_finished" />
+		<call method="ping" />
+	</sequence>
+</data>

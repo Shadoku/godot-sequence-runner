@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- call var= stores a return value (await on a plain value goes on at once);
+     call await="true" waits for a returned signal, then for a coroutine whose
+     final return value var= stores. -->
+<data>
+	<sequence>
+		<call method="double" arg0="1" await="true" var="one" />
+		<call method="record" arg0="$one" />
+		<call method="double" arg0="21" var="answer" />
+		<call method="record" arg0="$answer" />
+		<call method="fired_signal" await="true" />
+		<call method="ping" />
+		<call method="slow_value" await="true" var="slow" />
+		<call method="record" arg0="$slow" />
+	</sequence>
+</data>

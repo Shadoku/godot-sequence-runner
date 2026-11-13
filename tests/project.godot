@@ -1,0 +1,10 @@
+; The test project: Godot runs the addon's tests from here (python3 tools/check.py).
+; It is not part of the addon. tools/godot.py copies ../sequence_runner.gd into
+; addons/sequence_runner/ (ignored by git) before every run.
+
+config_version=5
+
+[application]
+
+config/name="Sequence Runner Tests"
+config/features=PackedStringArray("4.7")

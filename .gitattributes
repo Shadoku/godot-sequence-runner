@@ -1,0 +1,6 @@
+# Normalize line endings; Godot writes LF and diffs stay clean across OSes.
+* text=auto eol=lf
+*.gd text eol=lf
+*.uid text eol=lf
+*.godot text eol=lf
+*.xml text eol=lf

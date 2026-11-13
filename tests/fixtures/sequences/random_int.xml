@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<set var="roll" value="random_int(1, 6)" />
+		<call method="record" arg0="$roll" />
+		<call method="record" arg0="random_int(1, 6)" />
+	</sequence>
+</data>

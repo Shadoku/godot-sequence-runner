@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Typed values: true / false (any case) are bools, a quoted token is the
+     string inside, a number reads as one; in call's arguments and set's value. -->
+<data>
+	<sequence>
+		<call method="take" arg0="true" arg1="'7'" arg2="FALSE" arg3="7" />
+		<set var="flag" value="True" />
+		<set var="code" value="'12'" />
+	</sequence>
+</data>

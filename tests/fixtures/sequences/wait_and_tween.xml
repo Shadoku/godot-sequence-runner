@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<wait seconds="0.05" />
+		<tween_move x="40" y="30" duration="0.05" />
+	</sequence>
+</data>

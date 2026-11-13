@@ -1,0 +1,17 @@
+# tools/check.py's per-checkout state (shard times)
+.check/
+
+# OS / tooling
+.DS_Store
+Thumbs.db
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# The test project's Godot cache, and the addon's copy tools/godot.py puts there
+tests/.godot/
+tests/addons/
+
+# Test output
+junit.xml
+__pycache__/

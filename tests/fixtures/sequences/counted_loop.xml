@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<set var="i" value="0" />
+		<label name="loop" />
+		<call on="target" method="ping" />
+		<set var="i" expr="$i + 1" />
+		<goto_if label="done" var="$i" op=">=" value="5" />
+		<goto label="loop" />
+		<label name="done" />
+	</sequence>
+</data>

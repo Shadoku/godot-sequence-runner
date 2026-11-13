@@ -1,0 +1,10 @@
+{
+  "name": "{{SLUG}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "python3 tools/check.py",
+    "test": "python3 tools/check.py --tier quick"
+  }
+}

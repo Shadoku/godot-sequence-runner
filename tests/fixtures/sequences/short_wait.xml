@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<wait seconds="0.05" />
+		<call method="ping" />
+	</sequence>
+</data>

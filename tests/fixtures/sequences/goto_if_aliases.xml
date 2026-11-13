@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- goto_if's word aliases lt, gt, le, ge (an XML attribute cannot hold a bare
+     "<"): $a against $b, recording 1 when lt jumps, 2 for gt, 3 for le, 4 for
+     ge. "strings" orders strings with lt, an error that jumps nowhere (a ping
+     follows); "unknown" names an operator the runner lacks, an error too. -->
+<data>
+	<sequence>
+		<goto_if label="lt" var="$a" op="lt" value="$b" />
+		<goto label="after_lt" />
+		<label name="lt" />
+		<call method="record" arg0="1" />
+		<label name="after_lt" />
+		<goto_if label="gt" var="$a" op="gt" value="$b" />
+		<goto label="after_gt" />
+		<label name="gt" />
+		<call method="record" arg0="2" />
+		<label name="after_gt" />
+		<goto_if label="le" var="$a" op="le" value="$b" />
+		<goto label="after_le" />
+		<label name="le" />
+		<call method="record" arg0="3" />
+		<label name="after_le" />
+		<goto_if label="ge" var="$a" op="ge" value="$b" />
+		<goto label="end" />
+		<label name="ge" />
+		<call method="record" arg0="4" />
+		<label name="end" />
+	</sequence>
+	<sequence name="strings">
+		<goto_if label="end" var="$element" op="lt" value="water" />
+		<call method="ping" />
+		<label name="end" />
+	</sequence>
+	<sequence name="unknown">
+		<goto_if label="end" var="$a" op="below" value="0" />
+		<call method="ping" />
+		<label name="end" />
+	</sequence>
+</data>

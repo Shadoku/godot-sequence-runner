@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A run-time problem (a call on an object that is not there) is an error,
+     and the sequence goes on to ping the target. -->
+<data>
+	<sequence>
+		<call on="nobody" method="ping" />
+		<call method="ping" />
+	</sequence>
+</data>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<sequence>
+		<call method="take_damage" arg0="$damage" />
+	</sequence>
+</data>

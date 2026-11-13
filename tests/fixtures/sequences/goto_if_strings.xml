@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- goto_if on strings: eq and != compare $element as a string (records 1 for
+     fire, 0 then 2 otherwise); "bad" orders strings with ">", an error that
+     jumps nowhere. -->
+<data>
+	<sequence>
+		<goto_if label="fire" var="$element" op="eq" value="fire" />
+		<call method="record" arg0="0" />
+		<goto label="next" />
+		<label name="fire" />
+		<call method="record" arg0="1" />
+		<label name="next" />
+		<goto_if label="end" var="$element" op="!=" value="water" />
+		<call method="record" arg0="2" />
+		<label name="end" />
+	</sequence>
+	<sequence name="bad">
+		<goto_if label="end" var="$element" op=">" value="water" />
+		<call method="ping" />
+		<label name="end" />
+	</sequence>
+</data>

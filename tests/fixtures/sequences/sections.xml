@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Two named sections in one file, each with its own label "done": "first"
+     records 1 twice, "second" skips a 99 and records 2. -->
+<data>
+	<sequence name="first">
+		<set var="i" value="0" />
+		<label name="loop" />
+		<call method="record" arg0="1" />
+		<set var="i" expr="$i + 1" />
+		<goto_if label="done" var="$i" op=">=" value="2" />
+		<goto label="loop" />
+		<label name="done" />
+	</sequence>
+	<sequence name="second">
+		<goto label="done" />
+		<call method="record" arg0="99" />
+		<label name="done" />
+		<call method="record" arg0="2" />
+	</sequence>
+</data>
