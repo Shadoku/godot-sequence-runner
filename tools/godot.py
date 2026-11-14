@@ -4,11 +4,11 @@
   python3 tools/godot.py <godot arguments>
 
 The addon is the single file sequence_runner.gd at the repository root, so that a
-project can copy or mirror it alone. The test project lives in tests/ (its own
-project.godot keeps Godot from scanning it when the whole repository sits inside
-another project), and this script copies the addon into
-tests/addons/sequence_runner/ (ignored by git) before starting Godot, so the tests
-always run the file as it is now.
+project can copy or mirror it alone. The test project is in tests/. Its own
+project.godot keeps Godot from scanning it when the whole repository is inside
+another project. This script copies the addon into tests/addons/sequence_runner/
+(ignored by git) before starting Godot, so the tests always run the file as it is
+now.
 
 Godot is $GODOT, then `godot` on PATH, then ~/.cache/godot/<version>/godot, which
 tools/install_godot.sh downloads (<version> is in .godot-version).

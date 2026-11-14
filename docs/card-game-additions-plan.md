@@ -1,6 +1,6 @@
 # Plan: additions for scripted card games
 
-Status: agreed 2026-11-13. Steps 0 to 5 are done; step 6 (docs) was written with
+Status: agreed 2026-11-13. Steps 0 to 5 are done. Step 6 (docs) was written with
 each feature (a README section per feature and the "What's new" table).
 
 ## Why
@@ -40,11 +40,11 @@ behaviour.
 
 ### 1. `start_and_wait(path := "", vars := {}, section := "") -> bool`
 
-A coroutine: calls `start()`; returns `false` at once when `start()` does; otherwise
-waits for `sequence_finished` only if the sequence is still `running`, then returns
+A coroutine. It calls `start()` and returns `false` at once when `start()` does. If not,
+it waits for `sequence_finished` only if the sequence is still `running`, and returns
 `true`. Fixes the hang of `runner.start(); await runner.sequence_finished` on a section
 of instant commands (it finishes inside `start()`). A file whose `<trigger>` defers the
-start (signal, timer) is not waited for: say so in the doc comment and README.
+start (signal, timer) is not waited for. Say so in the doc comment and README.
 
 ### 2. `stop_on_error`, `failed`, `<stop/>`
 
@@ -56,12 +56,12 @@ start (signal, timer) is not waited for: say so in the doc comment and README.
   a built-in command checks whether the run was stopped after resolving its operands
   and before acting (`call` does not call the method, `set` / `set_prop` do not write,
   `move` / `tween_move` do not move, `goto_if` does not jump...).
-- `<stop/>`: a command without attributes that calls `stop()`; `failed` stays false.
+- `<stop/>`: a command without attributes that calls `stop()`. `failed` stays false.
 
 ### 3. `max_instant_steps`
 
 `@export var max_instant_steps: int = 100000` (0: no limit). The run loop counts the
-commands run since it last waited; past the limit it pushes an error naming the file,
+commands run since it last waited. Past the limit it pushes an error naming the file,
 section and limit, sets `failed = true` and stops the sequence, whatever
 `stop_on_error` says. The count restarts each time the loop waits.
 
@@ -69,33 +69,33 @@ section and limit, sets `failed = true` and stops the sequence, whatever
 
 - `<run section="..." file="..." var="..." />`: plays a section (of `file`, default the
   playing file) on a child runner and waits until it finishes. The child is an instance
-  of the caller's own script (a subclass's commands carry), added as the caller's child,
+  of the caller's own script (a subclass's commands work), added as the caller's child,
   with the caller's `target`, `rng`, `verbose`, `stop_on_error`, `max_instant_steps`.
   It gets a shallow copy of the caller's scratch pad: objects and dictionaries are
   shared, the child's own `set`s do not leak back. `var` stores the child's `$result`
   variable in the caller's scratch pad (null when the child set none). The file's
-  `<trigger>` is ignored: the section runs at once. The child is freed when done.
+  `<trigger>` is ignored. The section runs at once. The child is freed when done.
 - Instant when the child finished inside its start, async otherwise.
 - Depth cap `MAX_RUN_DEPTH` (32): deeper is a run-time error and nothing runs.
-- A child that `failed` makes the caller fail too when `stop_on_error` is on; the
+- A child that `failed` makes the caller fail too when `stop_on_error` is on. The
   caller's `stop()` stops its running children.
 - A missing section is a compile problem when `file` is absent or a literal that can be
   read, and a run-time error otherwise.
 - `static func run_once(host: Node, path: String, vars := {}, section := "", runner_script: Script = null) -> bool`:
   a coroutine that attaches a temporary runner (of `runner_script`, default this
   script) to `host`, plays the section (trigger ignored), waits, frees the runner, and
-  returns whether it ran to its end without failing. One runner per resolving effect is
-  what lets a trigger fire while another effect resolves.
+  returns whether it ran to its end without failing. One runner per resolving effect
+  lets a trigger fire while another effect resolves.
 
 ### 5. Blocks: `<if>`, `<else/>`, `<for_each>`, array indices in paths
 
 - `<if expr="..."> ... <else/> ... </if>`: `expr` as `set`'s (compiled with the section,
   truthy runs the first part). `<else/>` is optional.
 - `<for_each var="m" in="$list" index="i"> ... </for_each>`: `in` is a token resolving
-  to an Array; the loop iterates a snapshot taken on entry (a card dying mid-loop does
-  not shift it), sets `$m` (and `$i`, optional, from 0) per round. An empty array skips
+  to an Array. The loop iterates a snapshot taken on entry (a card dying mid-loop does
+  not shift it) and sets `$m` (and `$i`, optional, from 0) per round. An empty array skips
   the body. Something that is not an Array is a run-time error and skips the body.
-- Blocks nest. Labels and `goto` work inside them; a `goto` out of a loop abandons it
+- Blocks nest. Labels and `goto` work inside them. A `goto` out of a loop abandons it
   (entering the `for_each` again from above starts afresh).
 - Parsing: the reader stays flat. Only for the element names `if` and `for_each` it
   appends an end marker command (`end_if`, `end_for_each`) at the element's end (at once
@@ -109,7 +109,7 @@ section and limit, sets `failed = true` and stops the sequence, whatever
   out of range is the usual "has no" error). Today that is an error, so nothing changes
   for working files.
 - Check and document whether `&lt;` works inside an `expr` attribute (Godot's XMLParser
-  may not decode entities); if not, document `not (a >= b)` style or add nothing.
+  may not decode entities). If not, document `not (a >= b)` style or add nothing.
 
 ### 6. Docs
 
@@ -123,6 +123,6 @@ and compiler and can be built beside them. Step 4 builds on 1 to 3.
 
 ## Left out on purpose
 
-- Expressions keep reading ints as floats (`$i / 2` would change); use `int(...)`.
+- Expressions keep reading ints as floats (`$i / 2` would change). Use `int(...)`.
 - Passive effects (auras, cost modifiers) and the effect queue stay in the game.
 - A `wait_signal` on several signals: `call await` on a game method covers it.
