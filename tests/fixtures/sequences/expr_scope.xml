@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What an expression can reach: "runner" and "runner_name" use the bare
+     name `runner`, a run-time error that reads as 0; "roll" draws with
+     random_int() and random() inside expressions. -->
+<data>
+	<sequence name="runner">
+		<set var="a" value="1" />
+		<set var="a" expr="runner" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="runner_name">
+		<set var="a" value="1" />
+		<set var="a" expr="runner.name" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="roll">
+		<set var="whole" expr="random_int(1, 1000000)" />
+		<set var="part" expr="random(0, 1)" />
+	</sequence>
+</data>

@@ -683,6 +683,7 @@ Without a new name:
 - **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). A path that indexes an array was an error before.
 - **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 - **`<pause />` without `time`** pauses the scene tree until `<unpause />` and reports no error ([Commands](#commands)). It reported a run-time error before, and stopped the sequence with `stop_on_error` on. A `time` of 0 or less is still a run-time error.
+- **The bare name `runner` in an expression** is a run-time error and reads as `0`, as any other bare name ([Expressions](#expressions)). It read the runner node before, so `expr="runner.name"` returned its name.
 
 ## Development
 

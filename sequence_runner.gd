@@ -94,19 +94,25 @@ class CompiledExpr extends RefCounted:
 	var error: String = ""
 
 ## What an expression may call besides Godot's built-in functions: random(min,
-## max) and random_int(min, max), on the runner's rng. A bare name is a clear
-## error, except the scope's `runner`.
+## max) and random_int(min, max), on the runner's rng. A bare name is an error.
 class ExprScope extends RefCounted:
-	var runner: sequence_runner
+	# An Expression reads a bare name as a member of this scope, so no member
+	# holds the runner. A lambda made here answers get_object() with the scope,
+	# not with the runner it captured.
+	var _draw_float: Callable
+	var _draw_int: Callable
 
 	func _init(owner: sequence_runner) -> void:
-		runner = owner
+		_draw_float = func(min_value: float, max_value: float) -> float:
+			return owner.random(min_value, max_value)
+		_draw_int = func(min_value: int, max_value: int) -> int:
+			return owner.random_int(min_value, max_value)
 
 	func random(min_value: float, max_value: float) -> float:
-		return runner.random(min_value, max_value)
+		return _draw_float.call(min_value, max_value)
 
 	func random_int(min_value: int, max_value: int) -> int:
-		return runner.random_int(min_value, max_value)
+		return _draw_int.call(min_value, max_value)
 
 
 # Called when the node enters the scene tree for the first time.
