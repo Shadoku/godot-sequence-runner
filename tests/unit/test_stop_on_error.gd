@@ -54,7 +54,7 @@ func _runner(on: bool) -> sequence_runner:
 	runner.sequence_finished.connect(func() -> void: finished[0] += 1)
 	return runner
 
-## Plays `section` with stop_on_error on and checks that it failed and stopped
+## Runs `section` with stop_on_error on and checks that it failed and stopped
 ## at the first command, sequence_finished emitted once; returns the runner.
 func _failed_run(section: String, vars: Dictionary = {}) -> sequence_runner:
 	allow_errors = true

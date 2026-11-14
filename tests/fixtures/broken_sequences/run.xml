@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- <run> problems validate() lists: a section the playing file lacks, and one
+<!-- <run> compile errors validate() lists: a section its own file lacks, and one
      another (readable) file lacks. A section or file given by a $ reference,
      and a file that cannot be read, are checked at run time instead. The last
      two lines are sound. -->

@@ -93,6 +93,6 @@ func test_start_and_wait_leaves_start_and_its_hand_over_as_they_were() -> void:
 	var finished: Array[int] = [0]
 	runner.sequence_finished.connect(func() -> void: finished[0] += 1)
 	assert_true(runner.start("", {}, "chain"))
-	assert_eq(host.pings, 1, "start() hands over to ping.xml at once")
+	assert_eq(host.pings, 1, "start() chains into ping.xml at once")
 	assert_eq(finished[0], 1)
 	assert_eq(runner.xml_path, DIR + "ping.xml")

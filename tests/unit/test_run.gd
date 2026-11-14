@@ -1,7 +1,7 @@
 extends TestCase
-## Sub-sequences: `<run section file var />` plays a section on a child runner
+## Sub-sequences: `<run section file var />` runs a section on a child runner
 ## (an instance of the caller's script, with a shallow copy of its scratch pad)
-## and waits for it; `run_once()` plays a section on a temporary runner.
+## and waits for it; `run_once()` runs a section on a temporary runner.
 ## Fixtures: tests/fixtures/sequences/run*.xml, tests/fixtures/broken_sequences/run.xml.
 
 const DIR: String = "res://fixtures/sequences/"
@@ -97,7 +97,7 @@ func test_run_waits_for_an_async_child() -> void:
 	assert_eq(host.rolls, [1], "the caller waits for the child")
 	assert_true(runner.running)
 	var children := _runners_under(runner)
-	assert_eq(children.size(), 1, "the child is the caller's child while it plays")
+	assert_eq(children.size(), 1, "the child is the caller's child while it runs")
 	assert_true(children[0].running)
 	assert_true(await await_signal(runner.sequence_finished, 2.0))
 	assert_eq(host.rolls, [1, 2, 3])
@@ -135,7 +135,7 @@ func test_the_child_inherits_the_callers_settings() -> void:
 	runner.start(FILE, {}, "notes")
 	assert_eq(host.noted.size(), 1)
 	var seen: Dictionary = host.noted[0]
-	assert_ne(seen["runner"], runner, "a child runner played the section")
+	assert_ne(seen["runner"], runner, "a child runner ran the section")
 	assert_eq(seen["script"], runner.get_script())
 	assert_eq(seen["parent"], runner)
 	assert_eq(seen["target"], host)
@@ -163,7 +163,7 @@ func test_var_receives_the_childs_result() -> void:
 
 func test_run_ignores_the_files_trigger() -> void:
 	_runner().start("", {}, "trigger_caller")
-	assert_eq(host.rolls, [1], "played at once, without the signal")
+	assert_eq(host.rolls, [1], "ran at once, without the signal")
 
 func test_start_on_a_file_with_a_trigger_is_unchanged() -> void:
 	var runner := sequence_runner.attach(host, DIR + "run_trigger.xml")

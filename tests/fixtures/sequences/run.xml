@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- <run>: each caller section plays another section on a child runner. The
+<!-- <run>: each caller section runs another section on a child runner. The
      child sections ("two", "waits", "writes"...) are what the callers run. -->
 <data>
 	<sequence name="instant">

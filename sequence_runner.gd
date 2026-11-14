@@ -5,7 +5,7 @@ static var xml_cache: Dictionary = {}
 static var trigger_cache: Dictionary = {}
 ## Label maps: path -> {section name -> {label -> command index}}.
 static var label_cache: Dictionary = {}
-## Problems found reading a file (a duplicate section...): path -> its problems.
+## Compile errors found reading a file (a duplicate section...): path -> its errors.
 static var problem_cache: Dictionary = {}
 
 # Reusable sequence runner. Attach to a node, set xml_path, call start().
@@ -16,7 +16,8 @@ static var problem_cache: Dictionary = {}
 @export var auto_start: bool = false
 ## Drive the runner node itself instead of its parent.
 @export var target_self: bool = false
-## Print what the runner does (its target, each goto's jump) for debugging.
+## Print what the runner does (its target, each goto's jump, each <run>) for
+## debugging.
 @export var verbose: bool = false
 ## Stop the sequence at its first run-time error (run_error()) and set `failed`.
 ## Off: a run-time error is reported and the sequence goes on.
@@ -29,28 +30,28 @@ static var problem_cache: Dictionary = {}
 
 var target: Node = null
 var sequence: Array[Callable] = []
-## The section of xml_path the runner plays ("": the unnamed one).
+## The section of xml_path the runner runs ("": the unnamed one).
 var current_section: String = ""
-## The playing section's labels: name -> command index.
+## The running section's labels: name -> command index.
 var labels: Dictionary = {}
 var running: bool = false
 var index: int = 0
 var scratch_pad: Dictionary = {}
 ## Command name -> its factory, `factory(args: Dictionary, index: int) -> Callable`.
-## Filled by register_command(); a factory put here directly (the older way)
-## still works, its attributes unchecked.
+## Filled by register_command(). A factory put here directly still works, its
+## attributes unchecked.
 var command_factories: Dictionary = {}
 ## Command name -> the attributes it accepts (register_command()).
 var command_attributes: Dictionary = {}
-## How many problems the last compile found (an unknown command or attribute, a
-## goto to a missing label...), start()'s or validate()'s.
+## How many compile errors the last compile found (an unknown command or
+## attribute, a goto to a missing label...), start()'s or validate()'s.
 var compile_errors: int = 0
 ## The generator random() and random_int() draw from; null: the global one.
 ## A seeded generator makes the sequence's randomness reproducible.
 var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
 
-## Whether the last sequence was cut by stop() rather than played to its end.
+## Whether the last sequence was cut by stop() rather than run to its end.
 var stopped: bool = false
 ## Whether the last sequence was stopped by a run-time error (with
 ## stop_on_error on) or by max_instant_steps. start() clears it.
@@ -60,17 +61,18 @@ var _commands_registered: bool = false
 # Bumped by every run_sequence() and stop(), so a command's signal from an old
 # run does not resume the loop.
 var _run_id: int = 0
-# The tween the playing tween_move runs, killed by stop().
+# The running tween_move's tween, killed by stop().
 var _tween: Tween = null
-# While validate() runs: compile problems are collected, not pushed.
+# While validate() runs: compile errors are collected, not pushed.
 var _quiet: bool = false
-# The file and section being compiled, and the problems found, for compile_error().
+# The file and section being compiled, and the compile errors found, for
+# compile_error().
 var _compile_path: String = ""
 var _compile_section: String = ""
 var _compile_problems: PackedStringArray = PackedStringArray()
 
 signal sequence_finished
-# What the loop waits on while an async command plays (run_sequence()).
+# What the loop waits on during an async command (run_sequence()).
 signal _resumed
 
 ## The `$` references of an expression: a variable or a path (`$a`, `$piece.props.health`);
@@ -115,7 +117,6 @@ class ExprScope extends RefCounted:
 		return _draw_int.call(min_value, max_value)
 
 
-# Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if not _commands_registered:
@@ -130,11 +131,7 @@ func _ready() -> void:
 		target = self
 	if auto_start == true && xml_path != "":
 		start()
-	#var parsed = parse_xml("res://data/sequences/test.xml")
-	#sequence = compile_sequence(parsed)
-	#run_sequence(sequence)
-	#pass # Replace with function body.
-	
+
 ## Runs the section `section` ("": the unnamed <sequence>) of the file at `path`
 ## (or xml_path). `vars` seed the scratch pad after its reset, so the sequence
 ## can read them as `$name`. Returns false, with an error, when the file has no
@@ -143,14 +140,14 @@ func _ready() -> void:
 func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
 	return _start_section(path, vars, section, true)
 
-# start()'s work. `use_trigger` false plays the section at once whatever the
+# start()'s work. `use_trigger` false runs the section at once whatever the
 # file's <trigger> says (<run> and run_once()).
 func _start_section(path: String, vars: Dictionary, section: String, use_trigger: bool) -> bool:
 	if not _commands_registered:
 		register_commands()
 	xml_path = path if path != "" else xml_path
 	if xml_path == "":
-		push_error("sequence_runner: no xml path set")
+		push_error("sequence_runner: no XML file set (xml_path is empty)")
 		return false
 	var parsed := parse_xml(xml_path)
 	if not parsed.has(section):
@@ -185,7 +182,7 @@ func _start_section(path: String, vars: Dictionary, section: String, use_trigger
 ## commands (it finishes inside start()). Returns false at once when start()
 ## does (no such section, no file), true once the sequence has finished or was
 ## stopped. A file whose <trigger> defers the start (signal, timer) is not
-## waited for. It returns true at once and the sequence plays later.
+## waited for. It returns true at once and the sequence runs later.
 func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
 	if not start(path, vars, section):
 		return false
@@ -198,15 +195,15 @@ func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = 
 ## `<run>` that would go deeper is a run-time error and runs nothing.
 const MAX_RUN_DEPTH: int = 32
 
-## A coroutine: plays the section `section` of the file at `path` on a
+## A coroutine: runs the section `section` of the file at `path` on a
 ## temporary runner (an instance of `runner_script`, a sequence_runner script;
 ## null: sequence_runner) added as a child of `host`, which it targets. `vars`
 ## seed its scratch pad, as start()'s do. The file's <trigger> is ignored: the
-## section plays at once. Waits until it ends, frees the runner and returns
-## true when it played to its end (a <stop/> counts), false when the section is
-## missing, the run `failed`, or `host` was freed or left the tree mid-run (the
+## section runs at once. Waits until it ends, frees the runner and returns
+## true when it ran to its end (a <stop/> counts), false when the section is
+## missing, it `failed`, or `host` was freed or left the tree meanwhile (the
 ## runner is stopped; this then returns a frame later, outside the freeing).
-## One runner per call lets several sections play side by side.
+## One runner per call lets several sections run side by side.
 static func run_once(host: Node, path: String, vars: Dictionary = {}, section: String = "", runner_script: Script = null) -> bool:
 	if not is_instance_valid(host):
 		push_error("sequence_runner: run_once: no host")
@@ -245,9 +242,9 @@ static func run_once(host: Node, path: String, vars: Dictionary = {}, section: S
 	runner.queue_free()
 	return ok
 
-#sequence_runner.attach($node, "res://data/sequences/whatever.xml")
 ## Adds a runner for `xml` to `node`. `auto` starts it there with start()'s
-## `vars` and `section`.
+## `vars` and `section`. Example:
+## `sequence_runner.attach($node, "res://data/sequences/whatever.xml")`
 static func attach(node: Node, xml: String, auto: bool = false, vars: Dictionary = {}, section: String = "") -> sequence_runner:
 	var runner := sequence_runner.new()
 	runner.xml_path = xml
@@ -290,10 +287,10 @@ func register_commands() -> void:
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
-## Callable` builds it from an element's attributes, and `attributes` are the
+## Callable` builds it from the command's attributes, and `attributes` are the
 ## ones it accepts (an entry ending in `*` stands for that prefix followed by
 ## digits: call's `arg*` takes arg0, arg1...). Any other attribute is a compile
-## problem.
+## error.
 func register_command(cmd_name: String, factory: Callable, attributes: PackedStringArray) -> void:
 	command_factories[cmd_name] = factory
 	command_attributes[cmd_name] = attributes
@@ -310,10 +307,10 @@ static func accepts_attribute(accepted: PackedStringArray, attribute: String) ->
 	return false
 
 ## Compiles every section of the file at `path` without running anything or
-## pushing an error, and returns one line per problem: `<file>:<section>:
-## <problem>` (an unknown command, an unknown attribute of a known command, a
+## pushing an error, and returns one line per compile error: `<file>:<section>:
+## <error>` (an unknown command, an unknown attribute of a known command, a
 ## goto or goto_if to a label the section lacks, what a factory reported) and
-## `<file>: <problem>` for the file itself (it cannot be read, it has no
+## `<file>: <error>` for the file itself (it cannot be read, it has no
 ## section, two sections share a name). Empty when the file is sound. The
 ## runner's own commands count (a subclass's included), registered first when
 ## _ready() has not run, so a runner outside the tree can validate.
@@ -340,9 +337,9 @@ func validate(path: String) -> PackedStringArray:
 	compile_errors = problems.size()
 	return problems
 
-## Reports a problem found while compiling (a factory calls it for a bad
-## attribute value). It is counted in compile_errors and pushed as an error
-## unless validate() is collecting.
+## Reports a compile error (a factory calls it for a bad attribute value). It
+## is counted in compile_errors and pushed as an error unless validate() is
+## collecting.
 func compile_error(message: String) -> void:
 	compile_errors += 1
 	var line := "%s:%s: %s" % [_compile_path, _compile_section, message]
@@ -350,18 +347,6 @@ func compile_error(message: String) -> void:
 	if not _quiet:
 		push_error("sequence_runner: " + line)
 
-
-#func make_sequence() -> Array[Callable]:
-	#var new_sequence: Array[Callable] = []
-	#new_sequence.append(cmd_label("start", new_sequence.size()))
-	#new_sequence.append(cmd_wait(0.25))
-	#new_sequence.append(cmd_move(Vector2(64,64)))
-	#new_sequence.append(cmd_wait(0.25))
-	#new_sequence.append(cmd_move(Vector2(100,100)))
-	#new_sequence.append(cmd_goto("start")) 
-	#
-	#return new_sequence
-	
 ## A section's labels: label name -> the index of its (no-op) command.
 static func label_map(parsed: Array[Dictionary]) -> Dictionary:
 	var result: Dictionary = {}
@@ -375,7 +360,7 @@ static func label_map(parsed: Array[Dictionary]) -> Dictionary:
 ## factory (a label is a no-op, so indices match the commands'). Blocks are
 ## paired first (an <if> with its <else/> and end marker, a <for_each> with its
 ## end marker), so their factories know where to jump. A block's end marker
-## compiles to its loop-back or a no-op. Problems (an unknown command or
+## compiles to its loop-back or a no-op. Compile errors (an unknown command or
 ## attribute, a goto or goto_if to a label the section lacks, an <else/>
 ## outside an <if>) go through compile_error() and are counted in
 ## compile_errors. An unknown command compiles to a no-op.
@@ -411,9 +396,9 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 		result.append(factory.call(args, result.size()))
 	return result
 
-## Reports a problem met while running (an unresolvable reference, a missing
-## object, method, signal or key, a bad operand...) as an error naming the file
-## and section. The sequence goes on, unless stop_on_error is on: then `failed`
+## Reports a run-time error (an unresolvable reference, a missing object,
+## method, signal or key, a bad operand...) as an error naming the file and
+## section. The sequence goes on, unless stop_on_error is on: then `failed`
 ## turns true and the sequence stops (stop()), and the built-in command that met
 ## the error does nothing more (it checks `failed` before acting).
 func run_error(message: String) -> void:
@@ -438,7 +423,6 @@ func cmd_move(x_token: String, y_token: String) -> Callable:
 			if failed:
 				return null
 			target.global_position = Vector2(x, y)
-			#target.global_position = position
 		return null
 	
 func cmd_wait(time_token: String = "0") -> Callable:
@@ -446,7 +430,6 @@ func cmd_wait(time_token: String = "0") -> Callable:
 		var time := to_float(resolve_value(time_token))
 		if failed:
 			return null
-		#print("waiting...")
 		return get_tree().create_timer(time).timeout
 		
 ## Pauses the scene tree. A `time_token` above 0 unpauses it after that many
@@ -479,19 +462,14 @@ func cmd_goto(label: String) -> Callable:
 		jump(label)
 		return null
 
-## Moves the playing section to its label `label` (an error when it has none).
+## Moves the running section to its label `label` (an error when it has none).
 func jump(label: String) -> void:
 	if labels.has(label):
 		index = labels[label]
 		_leave_for_each_loops(index)
 	else:
 		run_error("no label \"%s\" in the section" % label)
-		
-#func cmd_label(label: String, index: int) -> Callable:
-	#scratch_pad[label] = index
-	#return func():
-		#return null
-		
+
 func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 	return func() -> Variant:
 		var anim_target: AnimatedSprite2D
@@ -513,9 +491,6 @@ func cmd_play_anim(anim: String, node_path: String = "") -> Callable:
 			anim_target.play(anim)
 		else:
 			run_error("play_anim: no AnimatedSprite2D found")
-		#anim_target.play(anim)
-		
-		#print("Playing anim: ", anim)
 		return null
 		
 func find_animated_sprite(node: Node) -> AnimatedSprite2D:
@@ -544,7 +519,7 @@ func cmd_call(on: String, method: String, args_tokens: Array, var_name: String =
 		if failed:
 			return null
 		if target_node == null or not target_node.has_method(method):
-			run_error("call: cannot locate object and/or method: %s:%s" % [on, method])
+			run_error("call: no object \"%s\", or it has no method \"%s\"" % [on, method])
 			return null
 		var result: Variant = target_node.callv(method, resolved_args)
 		var coroutine := is_coroutine(result)
@@ -574,12 +549,12 @@ func cmd_wait_signal(on: String, signal_name: String) -> Callable:
 			return null
 		if source and source.has_signal(signal_name):
 			return Signal(source, signal_name)
-		run_error("wait_signal: cannot locate object and/or signal: %s:%s" % [on, signal_name])
+		run_error("wait_signal: no object \"%s\", or it has no signal \"%s\"" % [on, signal_name])
 		return null
 		
-## Sets the scratch-pad variable `var_name` to `value` resolved as a token and
-## typed (to_value()), or to `expr` evaluated (an expression, compiled now: a
-## syntax error is a compile problem and the command then does nothing).
+## Sets the variable `var_name` to `value` resolved as a token and typed
+## (to_value()), or to `expr` evaluated (an expression, compiled now: a syntax
+## error is a compile error and the command then does nothing).
 func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 	var compiled := compile_command_expr("set", expr)
 	return func() -> Variant:
@@ -597,8 +572,8 @@ func cmd_set(var_name: String, value: Variant, expr: String) -> Callable:
 		return null
 			
 ## Writes at the path `prop` of what `on` names (an object as call's `on`
-## resolves it, or a scratch-pad dictionary; path_root()): `value` resolved as a
-## token, or `expr` evaluated as set's.
+## resolves it, or a variable holding a dictionary; path_root()): `value`
+## resolved as a token, or `expr` evaluated as set's.
 func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -> Callable:
 	var compiled := compile_command_expr("set_prop", expr)
 	return func() -> Variant:
@@ -616,18 +591,18 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		write_property_path(root, prop, value)
 		return null
 
-## Word aliases of goto_if's comparison operators. An XML attribute cannot
-## hold a bare `<`, so `op="lt"` reads as `op="<"`, and so on.
+## Word aliases of goto_if's comparison operators. A bare `<` in an attribute
+## is not valid XML, so `op="lt"` reads as `op="<"`, and so on.
 const GOTO_IF_OP_ALIASES := {"lt": "<", "gt": ">", "le": "<=", "ge": ">="}
 
 ## Jumps to `label` when `var_token` compared by `op` with `value_token` holds.
 ## `op` is `eq`, `!=`, `<`, `>`, `<=`, `>=`, `mod`, or one of the aliases
-## `lt`, `gt`, `le`, `ge` (GOTO_IF_OP_ALIASES). Each operand is a scratch-pad
-## variable's name or a token, typed by to_value(). When either is a string
-## that does not read as a number, `eq` and `!=` compare the two as strings and
-## the other operators (the aliases too) are an error; otherwise both compare
-## as numbers (a bool as 0 or 1). An operand that cannot be resolved, or an
-## unknown operator, is an error, and nothing jumps.
+## `lt`, `gt`, `le`, `ge` (GOTO_IF_OP_ALIASES). Each operand is a variable's
+## name or a token, typed by to_value(). When either is a string that does not
+## read as a number, `eq` and `!=` compare the two as strings and the other
+## operators (the aliases too) are an error; otherwise both compare as numbers
+## (a bool as 0 or 1). An operand that cannot be resolved, or an unknown
+## operator, is an error, and nothing jumps.
 func cmd_goto_if(label: String, var_token: String, op_name: String, value_token: String) -> Callable:
 	var op: String = GOTO_IF_OP_ALIASES.get(op_name, op_name)
 	return func() -> Variant:
@@ -675,8 +650,8 @@ func cmd_goto_if(label: String, var_token: String, op_name: String, value_token:
 			jump(label)
 		return null
 
-## A goto_if operand's value: the scratch-pad variable named `token`, else the
-## token resolved; typed by to_value().
+## A goto_if operand's value: the variable named `token`, else the token
+## resolved; typed by to_value().
 func goto_if_operand(token: String) -> Variant:
 	return to_value(scratch_pad[token] if scratch_pad.has(token) else resolve_value(token))
 	
@@ -692,7 +667,7 @@ func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Call
 		return tween.finished
 
 ## Ends the running sequence. No further command runs (one waiting is
-## abandoned, a tween_move's tween killed, a playing `<run>` child stopped and
+## abandoned, a tween_move's tween killed, a running `<run>` child stopped and
 ## freed), `running` turns false, `stopped` true, and sequence_finished is
 ## emitted at once, as at the end, so a host waiting on it never hangs. Does
 ## nothing when no sequence is running.
@@ -711,7 +686,7 @@ func stop() -> void:
 	_resumed.emit()
 	sequence_finished.emit()
 		
-## Plays `commands` from `index` as one coroutine: an instant command (it
+## Runs `commands` from `index` as one coroutine: an instant command (it
 ## returns null) goes straight on, an async one (it returns a Signal) is waited
 ## for. The loop waits on the runner's own `_resumed`, which the command's
 ## signal triggers for this run only, so stop() can end a waiting run at once
@@ -735,7 +710,6 @@ func run_sequence(commands: Array[Callable]) -> void:
 		instant_steps += 1
 		var current: Callable = sequence[index]
 		index = index + 1
-		#print("running command: ", index, " : ", current)
 
 		if current.is_valid():
 			var result: Variant = current.call()
@@ -757,7 +731,7 @@ func run_sequence(commands: Array[Callable]) -> void:
 	_tween = null
 	sequence_finished.emit()
 
-# An async command's signal fired: resumes the loop if its run still plays.
+# An async command's signal fired: resumes the loop if its run is the current one.
 func _on_command_done(run_id: int) -> void:
 	if run_id == _run_id:
 		_resumed.emit()
@@ -781,12 +755,12 @@ func parse_xml(path: String) -> Dictionary:
 	return parsed
 
 ## Reads the file at `path` once (cached): section name -> its commands
-## ({"name": element, "args": {attribute: value}}), the unnamed <sequence> under
+## ({"name": command, "args": {attribute: value}}), the unnamed <sequence> under
 ## "", in file order, flat (a nested element is the next command). An <if> or a
-## <for_each> is followed, where it ends, by an end marker command (`end_if`,
+## <for_each> is followed, where it ends, by an end marker (`end_if`,
 ## `end_for_each`, no attributes). Its <trigger> goes to trigger_cache. A second
-## section of the same name is dropped as a problem (problem_cache). Empty for a
-## file that cannot be read: an error unless `quiet`.
+## section of the same name is dropped as a compile error (problem_cache). Empty
+## for a file that cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	if xml_cache.has(path):
 		return xml_cache[path]
@@ -795,7 +769,7 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	var valid := parser.open(path) if FileAccess.file_exists(path) else ERR_FILE_NOT_FOUND
 	if valid != OK:
 		if not quiet:
-			push_error("sequence_runner: could not open XML file for command parsing: ", path)
+			push_error("sequence_runner: %s: cannot be read" % path)
 		return result
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
@@ -857,7 +831,7 @@ func setup_trigger() -> void:
 			if source_node && source_node.has_signal(signal_name):
 				source_node. connect(signal_name, _on_trigger_signal)
 			else:
-				run_error("trigger: cannot locate the source and/or its signal")
+				run_error("trigger: no node \"%s\", or it has no signal \"%s\"" % [source_path, signal_name])
 		"timer":
 			var seconds := float(trigger_config.get("seconds", "1.0"))
 			var timer := Timer.new()
@@ -881,9 +855,6 @@ func _on_trigger_timer(timer: Timer) -> void:
 	timer.queue_free()
 	if not running:
 		run_sequence(sequence)
-		
-
-#func compile_sequence(parsed: Array[Dictionary] -> Array[Callable]:
 
 ## The regex of an expression's `$` references (see _reference_regex).
 static func reference_regex() -> RegEx:
@@ -975,10 +946,10 @@ func evaluate_expr(text: String) -> Variant:
 			
 	
 ## The object `path` names (call's and wait_signal's `on`, the head of a
-## property path): `target`, `self`, then a scratch-pad entry of that name
-## holding an Object (a `$` prefix is accepted and stripped; an object handed in
-## with start()'s vars), then the node at `/root/<path>`, cached for the run as
-## `target_<path>` (scratch-pad objects are not cached). Null when none is found.
+## property path): `target`, `self`, then a variable of that name holding an
+## Object (a `$` prefix is accepted and stripped; an object handed in with
+## start()'s vars), then the node at `/root/<path>`, cached for the run as
+## `target_<path>` (a variable's object is not cached). Null when none is found.
 func resolve_target(path: String) -> Object:
 	var key := path.trim_prefix("$")
 	match key:
@@ -1034,8 +1005,8 @@ static func to_value(value: Variant) -> Variant:
 	return value
 	
 func resolve_random(token: String) -> float:
-	var opperands := token.trim_prefix("random(").trim_suffix(")")
-	var parts := opperands.split(",")
+	var operands := token.trim_prefix("random(").trim_suffix(")")
+	var parts := operands.split(",")
 	if parts.size() != 2:
 		run_error("expected random(min, max), got: " + token)
 		return 0.0
@@ -1044,8 +1015,8 @@ func resolve_random(token: String) -> float:
 	return random(min_val, max_val)
 	
 func resolve_random_int(token: String) -> int:
-	var opperands := token.trim_prefix("random_int(").trim_suffix(")")
-	var parts := opperands.split(",")
+	var operands := token.trim_prefix("random_int(").trim_suffix(")")
+	var parts := operands.split(",")
 	if parts.size() != 2:
 		run_error("expected random_int(min, max), got: " + token)
 		return 0
@@ -1088,7 +1059,7 @@ func resolve_property_path(path: String) -> Variant:
 	var parts := path.split(".")
 	var current: Variant = path_root(parts[0])
 	if current == null:
-		run_error("unresolvable reference: $" + path)
+		run_error("cannot resolve $" + path)
 		return null
 	for i: int in range(1, parts.size()):
 		var step := read_member(current, parts[i])
@@ -1098,10 +1069,10 @@ func resolve_property_path(path: String) -> Variant:
 		current = step[1]
 	return current
 
-## Where a property path starts: `target` and `self`, then a scratch-pad
-## variable of that name (an Object, a Dictionary, a Vector2... whatever it
-## holds; a `$` prefix is accepted), then the node at /root/<head>
-## (resolve_target()). Null when none is found.
+## Where a property path starts: `target` and `self`, then a variable of that
+## name (an Object, a Dictionary, a Vector2... whatever it holds; a `$` prefix
+## is accepted), then the node at /root/<head> (resolve_target()). Null when
+## none is found.
 func path_root(head: String) -> Variant:
 	var key := head.trim_prefix("$")
 	if key != "target" and key != "self" and scratch_pad.has(key) and typeof(scratch_pad[key]) != TYPE_OBJECT:
@@ -1244,11 +1215,7 @@ func factory_move(args: Dictionary, _index: int) -> Callable:
 func factory_wait(args: Dictionary, _index: int) -> Callable:
 	var seconds := str(args.get("seconds", "0"))
 	return cmd_wait(seconds)
-	
-#func factory_label(args: Dictionary, index: int) -> Callable:
-	#var label_name: String = args.get("name", "")
-	#return cmd_label(label_name, index)
-	
+
 func factory_goto(args: Dictionary, _index: int) -> Callable:
 	var label: String = args.get("label", "")
 	return cmd_goto(label)
@@ -1285,11 +1252,11 @@ func factory_set(args: Dictionary, _index: int) -> Callable:
 	return cmd_set(var_name, value, expr)
 	
 func factory_goto_if(args: Dictionary, _index: int) -> Callable:
-	var lable: String = args.get("label", "")
+	var label: String = args.get("label", "")
 	var var_name: String = args.get("var", "")
 	var op: String = args.get("op", "0")
 	var value: String = args.get("value", "0")
-	return cmd_goto_if(lable, var_name, op, value)
+	return cmd_goto_if(label, var_name, op, value)
 
 func factory_wait_signal(args: Dictionary, _index: int) -> Callable:
 	var on: String = args.get("on", "target")
@@ -1304,11 +1271,11 @@ func factory_tween_move(args: Dictionary, _index: int) -> Callable:
 
 # Blocks: <if> / <else/> and <for_each>, with the end markers the reader adds.
 
-# The block elements the reader closes with an end marker: element -> marker.
+# The block commands the reader closes with an end marker: command -> end marker.
 const _BLOCK_ENDS: Dictionary = {"if": "end_if", "for_each": "end_for_each"}
 
 # The for_each loops under way: the <for_each> command's index -> {"items" (the
-# snapshot), "at" (the round), "end" (its marker's index), "var", "index"}.
+# copy), "at" (the round), "end" (its end marker's index), "var", "index"}.
 # Cleared by start(); a goto out of a loop drops it (jump()).
 var _for_each_states: Dictionary = {}
 # While a section compiles: what _pair_blocks() found, command index -> its
@@ -1318,8 +1285,9 @@ var _block_links: Dictionary = {}
 # Pairs a section's blocks with a stack: an <if> (the built-in one) with its
 # <else/> and end marker, a <for_each> with its end marker. {"links": index ->
 # {"else", "end"} for an opener, {"opener"} for an <else/>, {"opener", "kind"}
-# for a marker; "problems": index -> the problems found at that command}. A
-# block name a subclass registered itself is not paired: its markers do nothing.
+# for an end marker; "problems": index -> the compile errors found at that
+# command}. A block name a subclass registered itself is not paired: its end
+# markers do nothing.
 func _pair_blocks(parsed: Array[Dictionary]) -> Dictionary:
 	var links: Dictionary = {}
 	var problems: Dictionary = {}
@@ -1353,9 +1321,9 @@ func _pair_blocks(parsed: Array[Dictionary]) -> Dictionary:
 				links[top]["end"] = at
 				links[at] = {"opener": top, "kind": opener_name}
 			else:
-				_block_problem(problems, at, "the end of an <%s> without its start" % opener_name)
+				_block_problem(problems, at, "</%s> without an <%s>" % [opener_name, opener_name])
 	for at: int in open:
-		_block_problem(problems, at, "<%s> without its end" % parsed[at].get("name", ""))
+		_block_problem(problems, at, "<%s> is not closed" % parsed[at].get("name", ""))
 	return {"links": links, "problems": problems}
 
 static func _block_problem(problems: Dictionary, at: int, message: String) -> void:
@@ -1380,7 +1348,7 @@ func _leave_for_each_loops(to: int) -> void:
 			_for_each_states.erase(at)
 
 # <if>: when `compiled` (null or broken: false) does not hold, goes on at
-# `skip_to` (after its <else/>, or after its end).
+# `skip_to` (after its <else/>, or after its end marker).
 func _cmd_if_block(compiled: CompiledExpr, skip_to: int) -> Callable:
 	return func() -> Variant:
 		var holds: bool = false
@@ -1391,7 +1359,7 @@ func _cmd_if_block(compiled: CompiledExpr, skip_to: int) -> Callable:
 			index = skip_to
 		return null
 
-# <for_each>: snapshots what `source` resolves to and starts the first round,
+# <for_each>: copies what `source` resolves to and starts the first round,
 # or skips past `end` (an empty array; not an array: an error).
 func _cmd_for_each_block(var_name: String, source: String, index_name: String, at: int, end: int) -> Callable:
 	return func() -> Variant:
@@ -1439,9 +1407,9 @@ func _for_each_round(state: Dictionary) -> void:
 	if state["index"] != "":
 		scratch_pad[state["index"]] = at
 
-## <if expr="...">: runs the commands up to its <else/> (or its end) when
-## `expr` (an expression, as set's) holds, else those after its <else/>. A
-## missing or malformed expr is a compile problem and reads as false.
+## <if expr="...">: runs the commands up to its <else/> (or its end marker)
+## when `expr` (an expression, as set's) holds, else those after its <else/>.
+## A missing or malformed expr is a compile error and reads as false.
 func factory_if_block(args: Dictionary, at: int) -> Callable:
 	var expr := str(args.get("expr", ""))
 	if expr == "":
@@ -1455,7 +1423,7 @@ func factory_if_block(args: Dictionary, at: int) -> Callable:
 	return _cmd_if_block(compiled, (else_at if else_at >= 0 else end) + 1)
 
 ## <else/>: reached at the end of its <if>'s first part, goes on after the
-## <if>'s end. Outside an <if> it is a compile problem and does nothing.
+## <if>'s end marker. Outside an <if> it is a compile error and does nothing.
 func factory_else_block(_args: Dictionary, at: int) -> Callable:
 	var link: Dictionary = _block_links.get(at, {})
 	var opener: Dictionary = _block_links.get(link.get("opener", -1), {})
@@ -1467,7 +1435,7 @@ func factory_else_block(_args: Dictionary, at: int) -> Callable:
 		return null
 
 ## <for_each var="m" in="$list" index="i">: runs its body once per element of
-## a snapshot of the Array (or packed array) `in` resolves to, with `$m` the
+## a copy of the Array (or packed array) `in` resolves to, with `$m` the
 ## element and `$i` (when named) its index from 0. An empty array skips the
 ## body; something that is not an array is an error and skips it too.
 func factory_for_each_block(args: Dictionary, at: int) -> Callable:
@@ -1490,14 +1458,14 @@ func factory_stop(_args: Dictionary, _index: int) -> Callable:
 
 # How deep this runner is in a chain of <run>s (0: started by the game).
 var _run_depth: int = 0
-# The <run> children playing now: stop() stops them.
+# The <run> children running now: stop() stops them.
 var _run_children: Array[sequence_runner] = []
 
-## <run section="..." file="..." var="...">: plays the section `section` ("":
-## the unnamed one) of `file` (default: the playing file) on a child runner
+## <run section="..." file="..." var="...">: runs the section `section` ("":
+## the unnamed one) of `file` (default: this runner's file) on a child runner
 ## and waits until it ends (see _cmd_run_section()). When neither `file` nor
 ## `section` is a `$` reference and the file can be read, a section it lacks
-## is a compile problem; otherwise it is found out at run time.
+## is a compile error; otherwise it is found out at run time.
 func factory_run_section(args: Dictionary, _index: int) -> Callable:
 	var file := str(args.get("file", ""))
 	var section := str(args.get("section", ""))
@@ -1508,13 +1476,13 @@ func factory_run_section(args: Dictionary, _index: int) -> Callable:
 			compile_error("<run>: %s has no section \"%s\"" % [path, section])
 	return _cmd_run_section(file, section, var_name)
 
-# <run>: resolves the file and section, then plays the section on a child
+# <run>: resolves the file and section, then runs the section on a child
 # runner: an instance of this runner's own script, added as its child, with
 # its target, rng, verbose, stop_on_error and max_instant_steps, one level
 # deeper, and a shallow copy of the scratch pad without `result`. The file's
 # <trigger> is ignored. Instant when the child ends inside its start, async
-# otherwise (the loop waits for it). A section the file lacks, or a run deeper
-# than MAX_RUN_DEPTH, is a run-time error and nothing runs.
+# otherwise (the loop waits for it). A section the file lacks, or a <run>
+# nested deeper than MAX_RUN_DEPTH, is a run-time error and nothing runs.
 func _cmd_run_section(file_token: String, section_token: String, var_name: String) -> Callable:
 	return func() -> Variant:
 		var path: Variant = xml_path if file_token == "" else resolve_value(file_token)
@@ -1563,7 +1531,7 @@ func _await_run_child(child: sequence_runner, var_name: String, run_id: int) -> 
 	_end_run_child(child, var_name, run_id, false)
 
 # A <run> child ended: it is freed (at once when it ended inside its start,
-# else once its sequence_finished is over). If this runner still plays the
+# else once its sequence_finished is over). If this runner is still in the
 # same run, a failed child fails it when stop_on_error is on (run_error());
 # otherwise `var_name` gets the child's $result (null when it set none).
 func _end_run_child(child: sequence_runner, var_name: String, run_id: int, instant: bool) -> void:

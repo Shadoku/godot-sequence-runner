@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Block problems validate() lists: an <else/> outside an <if> (at the top and
-     directly inside a <for_each>), an expr that does not parse, an unknown
-     attribute, a <for_each> without "in", a second <else/>, an <if> without
-     "expr". -->
+<!-- Block compile errors validate() lists: an <else/> outside an <if> (at the
+     top and directly inside a <for_each>), an expr that does not parse, an
+     unknown attribute, a <for_each> without "in", a second <else/>, an <if>
+     without "expr". -->
 <data>
 	<sequence>
 		<else />

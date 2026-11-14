@@ -112,9 +112,9 @@ These are the rules that keep it at seconds:
   for async behaviour. Keep waits in fixtures at a few hundredths of a second.
 - Any `ERROR` / `SCRIPT ERROR` printed while a test runs fails it. Set
   `allow_errors = true` in a test that triggers one on purpose (the runner reports
-  every problem with `push_error`).
+  every error with `push_error`).
 - One fixture per feature: `tests/fixtures/sequences/` (every file there validates)
-  and `tests/fixtures/broken_sequences/` (compile problems on purpose).
+  and `tests/fixtures/broken_sequences/` (compile errors on purpose).
 - One test: `python3 tools/check.py --filter <name>` (a substring of
   `unit/test_x.gd::test_y`). A name that matches nothing fails.
 - Randomness: give the runner a seeded `rng`; never assert on the global generator.
@@ -137,7 +137,7 @@ Projects in use copy this file, and some subclass it. A change must not break th
   member here whose name a subclass already uses stops that subclass from compiling.
   Choose distinctive names (a known subclass has a static `play()`), and list every
   new public name in the README.
-- `start()` called while a sequence runs hands over to the new one (the README's
+- `start()` called while a sequence runs chains into the new one (the README's
   "Chain into another sequence"). Keep it.
 - The file must stay usable alone: everything it needs is inside it.
 

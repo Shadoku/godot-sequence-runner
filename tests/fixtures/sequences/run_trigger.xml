@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- A file whose trigger defers start(): <run> and run_once() ignore it and
-     play the section at once. -->
+     run the section at once. -->
 <data>
 	<trigger type="signal" source="." signal="fired" />
 	<sequence>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Compile problems validate() must list (tests/unit/test_sequence_runner.gd):
+<!-- Compile errors validate() must list (tests/unit/test_sequence_runner.gd):
      an unknown command, an unknown attribute, a goto to a label its section
      lacks (the other section's label does not count), a second section of one
      name. The call with arguments, var and await is sound. -->

@@ -93,7 +93,7 @@ func test_max_instant_steps_in_a_run_child_loop_without_stop_on_error() -> void:
 	allow_errors = true
 	var runner := _runner(false, 100)
 	runner.start("", {"list": _range(1000)}, "run_big_loop")
-	assert_eq(host.pings, 50, "the child got the caller's cap")
+	assert_eq(host.pings, 50, "the child got the caller's limit")
 	assert_eq(host.rolls, ["after"], "the caller carried on")
 	assert_false(runner.failed)
 

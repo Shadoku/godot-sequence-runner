@@ -49,7 +49,7 @@ func test_a_path_reads_an_array_by_index() -> void:
 func test_set_prop_writes_an_array_element() -> void:
 	var vars := _vars()
 	_runner().start("", vars, "write")
-	assert_eq(vars["list"], [10, 6, 6], "prop=\"0\" on a scratch-pad array; a value read by index")
+	assert_eq(vars["list"], [10, 6, 6], "prop=\"0\" on a variable holding an array; a value read by index")
 	assert_eq(vars["card"]["tags"], ["fire", "cold"], "an array inside a dictionary")
 	assert_almost_eq(float(vars["grid"][1][0]), 6.0, 0.0001, "an array inside an array, by expr")
 	assert_eq(host.items, [9, 2, 3] as Array[int], "an object's array property")

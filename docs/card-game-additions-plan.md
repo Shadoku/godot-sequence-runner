@@ -19,8 +19,8 @@ Projects in use copy `sequence_runner.gd`, and some subclass it (goo_pachinko's
 - New behaviour is a new method, a new command, a new attribute, or an export whose
   default is today's behaviour. The one agreed exception: `max_instant_steps` defaults
   to 100000 (it only fires where the game would otherwise hang).
-- `start()` while a sequence runs stays a hand-over (the README's "Chain into another
-  sequence").
+- `start()` while a sequence runs still chains into the new one (the README's "Chain
+  into another sequence").
 - A subclass's command registered after `super.register_commands()` keeps winning over
   a built-in of the same name.
 - New public names must be distinctive: a subclass that already defines the same method
@@ -67,8 +67,8 @@ section and limit, sets `failed = true` and stops the sequence, whatever
 
 ### 4. Sub-sequences: `<run>` and `run_once()`
 
-- `<run section="..." file="..." var="..." />`: plays a section (of `file`, default the
-  playing file) on a child runner and waits until it finishes. The child is an instance
+- `<run section="..." file="..." var="..." />`: runs a section (of `file`, default the
+  caller's file) on a child runner and waits until it finishes. The child is an instance
   of the caller's own script (a subclass's commands work), added as the caller's child,
   with the caller's `target`, `rng`, `verbose`, `stop_on_error`, `max_instant_steps`.
   It gets a shallow copy of the caller's scratch pad: objects and dictionaries are
@@ -76,14 +76,14 @@ section and limit, sets `failed = true` and stops the sequence, whatever
   variable in the caller's scratch pad (null when the child set none). The file's
   `<trigger>` is ignored. The section runs at once. The child is freed when done.
 - Instant when the child finished inside its start, async otherwise.
-- Depth cap `MAX_RUN_DEPTH` (32): deeper is a run-time error and nothing runs.
+- Depth limit `MAX_RUN_DEPTH` (32): deeper is a run-time error and nothing runs.
 - A child that `failed` makes the caller fail too when `stop_on_error` is on. The
   caller's `stop()` stops its running children.
-- A missing section is a compile problem when `file` is absent or a literal that can be
+- A missing section is a compile error when `file` is absent or a literal that can be
   read, and a run-time error otherwise.
 - `static func run_once(host: Node, path: String, vars := {}, section := "", runner_script: Script = null) -> bool`:
   a coroutine that attaches a temporary runner (of `runner_script`, default this
-  script) to `host`, plays the section (trigger ignored), waits, frees the runner, and
+  script) to `host`, runs the section (trigger ignored), waits, frees the runner, and
   returns whether it ran to its end without failing. One runner per resolving effect
   lets a trigger fire while another effect resolves.
 
@@ -92,17 +92,17 @@ section and limit, sets `failed = true` and stops the sequence, whatever
 - `<if expr="..."> ... <else/> ... </if>`: `expr` as `set`'s (compiled with the section,
   truthy runs the first part). `<else/>` is optional.
 - `<for_each var="m" in="$list" index="i"> ... </for_each>`: `in` is a token resolving
-  to an Array. The loop iterates a snapshot taken on entry (a card dying mid-loop does
+  to an Array. The loop iterates a copy taken on entry (a card dying mid-loop does
   not shift it) and sets `$m` (and `$i`, optional, from 0) per round. An empty array skips
   the body. Something that is not an Array is a run-time error and skips the body.
 - Blocks nest. Labels and `goto` work inside them. A `goto` out of a loop abandons it
   (entering the `for_each` again from above starts afresh).
 - Parsing: the reader stays flat. Only for the element names `if` and `for_each` it
-  appends an end marker command (`end_if`, `end_for_each`) at the element's end (at once
+  appends an end marker (`end_if`, `end_for_each`) at the element's end (at once
   for a self-closed one). Any other nested element reads as before.
-  The compiler pairs openers, `else` and markers with a stack and reports an `else`
+  The compiler pairs openers, `else` and end markers with a stack and reports an `else`
   outside an `if`. When a subclass registered its own `if` or `for_each`, its factory
-  wins and the markers of that name compile to no-ops without an error.
+  wins and the end markers of that name compile to no-ops without an error.
 - Loop state lives in the runner (per command index), not in the scratch pad, and is
   cleared by `start()`.
 - Paths index arrays: `$list.0`, `$card.tags.1`, and `set_prop prop="list.0"` (an index

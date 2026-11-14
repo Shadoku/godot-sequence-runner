@@ -5,11 +5,11 @@ extends TestCase
 ## errors and validate(), the seeded rng, typed values, stop(), goto_if on strings
 ## and its aliases lt / gt / le / ge, and the free-form expressions. Fixtures:
 ## tests/fixtures/sequences/ (all compile) and tests/fixtures/broken_sequences/
-## (compile problems on purpose). A change to the addon may add tests here; an
+## (compile errors on purpose). A change to the addon may add tests here; an
 ## existing one changes only when the behaviour it pins is changed on purpose.
 
 const DIR: String = "res://fixtures/sequences/"
-## Files with compile problems, for validate() (kept apart: every file in DIR validates).
+## Files with compile errors, for validate() (kept apart: every file in DIR validates).
 const BROKEN_DIR: String = "res://fixtures/broken_sequences/"
 
 ## The node a runner drives: records the calls its sequences make.

@@ -1,7 +1,7 @@
 extends TestCase
 ## Blocks: `<if expr> ... <else/> ... </if>` and `<for_each var in index> ...
 ## </for_each>`, what the reader makes of them (end markers for these two
-## names only), validate()'s block problems, a subclass's own `if` /
+## names only), validate()'s block compile errors, a subclass's own `if` /
 ## `for_each`, and the XML entities an `expr` may hold. Fixtures:
 ## tests/fixtures/sequences/blocks*.xml and tests/fixtures/broken_sequences/blocks*.xml.
 

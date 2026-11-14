@@ -2,7 +2,7 @@ extends TestCase
 ## max_instant_steps: a sequence that runs more commands than this without
 ## waiting is stopped with an error and `failed`, whatever stop_on_error says,
 ## instead of hanging the game. The count restarts each time the sequence waits.
-## 0 disables the cap. Fixture: max_instant_steps.xml.
+## 0 disables the limit. Fixture: max_instant_steps.xml.
 
 const FILE: String = "res://fixtures/sequences/max_instant_steps.xml"
 
@@ -21,7 +21,7 @@ func before_each() -> void:
 	add_child(host)
 	finished = [0]
 
-## A runner on the host for max_instant_steps.xml capped at `cap`, its
+## A runner on the host for max_instant_steps.xml with the limit `cap`, its
 ## sequence_finished counted in `finished`.
 func _runner(cap: int) -> sequence_runner:
 	var runner := sequence_runner.attach(host, FILE)
@@ -29,7 +29,7 @@ func _runner(cap: int) -> sequence_runner:
 	runner.sequence_finished.connect(func() -> void: finished[0] += 1)
 	return runner
 
-## Checks that `runner` was stopped by the cap: failed, stopped, finished once.
+## Checks that `runner` was stopped by the limit: failed, stopped, finished once.
 func _assert_capped(runner: sequence_runner) -> void:
 	assert_true(runner.failed, "failed")
 	assert_true(runner.stopped, "stopped")
@@ -44,7 +44,7 @@ func test_max_instant_steps_defaults_to_100000() -> void:
 func test_a_loop_that_never_waits_is_stopped_with_an_error() -> void:
 	allow_errors = true
 	var runner := _runner(50)
-	assert_false(runner.stop_on_error, "the cap applies with stop_on_error off")
+	assert_false(runner.stop_on_error, "the limit applies with stop_on_error off")
 	runner.start("", {}, "spin")
 	_assert_capped(runner)
 
@@ -80,7 +80,7 @@ func test_instant_commands_below_the_default_cap_are_unaffected() -> void:
 func test_zero_disables_the_cap() -> void:
 	var runner := _runner(0)
 	runner.start("", {}, "counted")
-	assert_almost_eq(float(runner.scratch_pad["i"]), 200.0, 0.0001, "401 commands ran")
+	assert_almost_eq(float(runner.scratch_pad["i"]), 200.0, 0.0001, "601 commands ran")
 	assert_false(runner.failed)
 
 func test_the_count_restarts_when_the_sequence_waits() -> void:

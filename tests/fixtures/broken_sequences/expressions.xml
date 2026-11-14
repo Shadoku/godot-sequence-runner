@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Expressions that do not parse: compile problems validate() lists. -->
+<!-- Expressions that do not parse: compile errors validate() lists. -->
 <data>
 	<sequence>
 		<set var="a" expr="1 +" />

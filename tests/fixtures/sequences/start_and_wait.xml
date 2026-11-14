@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- start_and_wait(): "instant" finishes inside start(), "async" waits a moment
-     before its ping, "chain" hands over to ping.xml. -->
+     before its ping, "chain" chains into ping.xml. -->
 <data>
 	<sequence name="instant">
 		<call method="ping" />
