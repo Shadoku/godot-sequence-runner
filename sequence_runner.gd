@@ -583,7 +583,7 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		if failed:
 			return null
 		if root == null:
-			run_error("set_prop: cannot locate object: " + on)
+			run_error("set_prop: no object \"%s\"" % on)
 			return null
 		var value: Variant = run_expr(compiled) if compiled != null else to_value(resolve_value(value_token))
 		if failed:
@@ -783,6 +783,9 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 				for arg: int in range(parser.get_attribute_count()):
 					config[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
 				trigger_cache[path] = config
+				var trigger_type: String = config.get("type", "manual")
+				if not TRIGGER_TYPES.has(trigger_type):
+					problems.append("trigger type \"%s\" is not one of %s" % [trigger_type, ", ".join(TRIGGER_TYPES)])
 				continue
 
 			if node_name == "sequence":
@@ -820,6 +823,10 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	return result
 				
 				 
+## The values a <trigger>'s `type` may have. Any other is an error: validate()
+## lists it, and start() reports it and runs nothing.
+const TRIGGER_TYPES: PackedStringArray = ["auto", "manual", "signal", "timer"]
+
 func setup_trigger() -> void:
 	var type: String = trigger_config.get("type", "manual")
 	
@@ -842,6 +849,8 @@ func setup_trigger() -> void:
 			timer.start()
 		"auto", "manual":
 			run_sequence(sequence)
+		_:
+			run_error("trigger: type \"%s\" is not one of %s; nothing runs" % [type, ", ".join(TRIGGER_TYPES)])
 				
 func _on_trigger_signal(body: Node = null) -> void:
 	var filter_group: String = trigger_config.get("filter_group", "")

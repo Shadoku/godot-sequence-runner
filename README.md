@@ -449,6 +449,8 @@ Place a `<trigger>` before `<sequence>` to control when it starts.
 | `signal` | `source`, `signal`, `filter_group` | Waits for a signal from a relative node |
 | `timer` | `seconds` | Starts after a one-shot delay |
 
+Any other `type` is an error: `validate()` lists it, and `start()` reports it and runs nothing. A `<trigger>` without `type` is `manual`.
+
 ```xml
 <trigger type="signal" source="../HitBox" signal="body_entered" filter_group="player" />
 <trigger type="timer" seconds="3.0" />
@@ -586,11 +588,12 @@ Every error is reported with `push_error`, so it shows as an `ERROR:` line (and 
 - an `<if>` without `expr`
 - a `<for_each>` without `in`
 - an `<else/>` outside an `<if>` or a second one in the same `<if>`
+- an `<if>` or `<for_each>` that is not closed, or a closing tag without its start tag
 - a `<run>` to a section its (literal or left out) file lacks
 - what a factory reports with `compile_error()`
-- in the file itself, a second section of the same name or no section at all
+- in the file itself, a second section of the same name, no section at all, or a `<trigger>` whose `type` is not `auto`, `manual`, `signal` or `timer`
 
-`start()` pushes the errors found while it compiles the section, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A file's own errors (a second section of the same name, no section) are pushed once, the first time the file is read, unless `validate()` read it first. `start()` does not count them in `compile_errors`. Only `validate()` does. A file with no section does not start: `start()` returns `false`. Asking `start()` for a section the file lacks is an error too, and nothing runs.
+`start()` pushes the errors found while it compiles the section, counts them in `compile_errors` and still runs the section (an unknown command does nothing). A file's own errors (a second section of the same name, no section, an unknown trigger type) are pushed once, the first time the file is read, unless `validate()` read it first. `start()` does not count them in `compile_errors`. Only `validate()` does. A file with no section does not start: `start()` returns `false`. Asking `start()` for a section the file lacks is an error too, and nothing runs.
 
 **Run-time errors** are pushed while the sequence runs, and it carries on:
 
@@ -678,6 +681,7 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<run section file var />` | command | [Sub-sequences](#sub-sequences) |
 | `factory_run_section(args, index) -> Callable` | method (the `run` command's factory) | [Sub-sequences](#sub-sequences) |
 | `MAX_RUN_DEPTH` | constant (int, `32`) | [Sub-sequences](#sub-sequences) |
+| `TRIGGER_TYPES` | constant (the four `<trigger>` types) | [Triggers](#triggers) |
 | `run_once(host, path, vars, section, runner_script) -> bool` | static method (coroutine) | [Sub-sequences](#sub-sequences) |
 
 Without a new name:
@@ -686,6 +690,7 @@ Without a new name:
 - **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 - **`<pause />` without `time`** pauses the scene tree until `<unpause />` and reports no error ([Commands](#commands)). It reported a run-time error before, and stopped the sequence with `stop_on_error` on. A `time` of 0 or less is still a run-time error.
 - **The bare name `runner` in an expression** is a run-time error and reads as `0`, as any other bare name ([Expressions](#expressions)). It read the runner node before, so `expr="runner.name"` returned its name.
+- **A `<trigger>` with an unknown `type`** is an error: `validate()` lists it, and `start()` reports it ([Triggers](#triggers)). It ran nothing and reported nothing before.
 
 ## Development
 

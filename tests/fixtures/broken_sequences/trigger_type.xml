@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A <trigger> whose type is none of auto, manual, signal, timer. -->
+<data>
+	<trigger type="singal" source=".." signal="fired" />
+	<sequence>
+		<call method="ping" />
+	</sequence>
+</data>
