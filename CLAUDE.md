@@ -101,7 +101,7 @@ These are the rules that keep it at seconds:
 - The tests are a Godot project of their own, `tests/`. Every stage runs Godot
   headless on it through `tools/godot.py`, which first copies `sequence_runner.gd`
   into `tests/addons/sequence_runner/` (ignored by git). Inside Godot, `res://` is
-  `tests/`: a fixture is `res://fixtures/sequences/x.xml`.
+  `tests/`. A fixture is `res://fixtures/sequences/x.xml`.
 - Files: `tests/unit/**/test_*.gd`, `extends TestCase`, methods named `test_*`.
 - A fresh instance runs per test method: `before_each` / `after_each` for fixtures.
 - Assertions: `assert_eq`, `assert_ne`, `assert_true`, `assert_false`, `assert_null`,
