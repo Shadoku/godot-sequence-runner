@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- pause: "bare" has no time and pauses the scene tree until an <unpause />;
+     "zero" and "negative" pause too and report a run-time error; "timed"
+     pauses for its time; "unpaused" pauses, then unpauses. Each pings after. -->
+<data>
+	<sequence name="bare">
+		<pause />
+		<call method="ping" />
+	</sequence>
+	<sequence name="zero">
+		<pause time="0" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="negative">
+		<pause time="-1" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="timed">
+		<pause time="0.02" />
+		<call method="ping" />
+	</sequence>
+	<sequence name="unpaused">
+		<pause />
+		<unpause />
+		<call method="ping" />
+	</sequence>
+</data>

@@ -443,9 +443,12 @@ func cmd_wait(time_token: String = "0") -> Callable:
 		#print("waiting...")
 		return get_tree().create_timer(time).timeout
 		
+## Pauses the scene tree. A `time_token` above 0 unpauses it after that many
+## seconds and the sequence waits for it. An empty one (`<pause />` without
+## `time`) leaves the tree paused until an `<unpause />`. A time of 0 or less
+## pauses too and is a run-time error.
 func cmd_pause(time_token: String = "0.016") -> Callable:
 	return func() -> Variant:
-		#print("waiting...")
 		var time := to_float(resolve_value(time_token))
 		if failed:
 			return null
@@ -454,7 +457,8 @@ func cmd_pause(time_token: String = "0.016") -> Callable:
 			var timer := get_tree().create_timer(time, true, false, false)
 			timer.timeout.connect(func() -> void: get_tree().paused = false)
 			return timer.timeout
-		run_error("pause: the pause time is zero (leave time out or set it above 0)")
+		if time_token != "":
+			run_error("pause: time is %s; set it above 0, or leave it out to pause until <unpause />" % time)
 		return null
 		
 func cmd_unpause() -> Callable:

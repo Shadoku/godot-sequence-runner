@@ -131,7 +131,7 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on a target object. `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
-| `pause` | `time` | Pause the scene tree (optionally for a duration) |
+| `pause` | `time` (optional) | Pause the scene tree. With `time` above 0, unpause it after that many seconds and wait until then (async). Without `time`, it stays paused until `unpause`. A `time` of 0 or less pauses too and is a run-time error |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
 | `run` | `section`, `file` (optional), `var` (optional) | Play a section (of `file`, default the playing file) on a child runner and wait for it. `var` gets its `$result` (see [Sub-sequences](#sub-sequences)) |
@@ -597,6 +597,7 @@ Every problem is reported with `push_error`, so it shows as an `ERROR:` line (an
 - a `goto_if` operand it cannot compare
 - an expression that fails (an unknown function, a division by zero)
 - a `<for_each>` whose `in` is not an array
+- a `<pause>` whose `time` is 0 or less
 - a `<run>` to a missing section or past `MAX_RUN_DEPTH`
 - a `<run>` child that failed (only with `stop_on_error` on, see [Sub-sequences](#sub-sequences))
 
@@ -681,6 +682,7 @@ Without a new name:
 
 - **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). A path that indexes an array was an error before.
 - **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
+- **`<pause />` without `time`** pauses the scene tree until `<unpause />` and reports no error ([Commands](#commands)). It reported a run-time error before, and stopped the sequence with `stop_on_error` on. A `time` of 0 or less is still a run-time error.
 
 ## Development
 
