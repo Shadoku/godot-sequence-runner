@@ -23,7 +23,11 @@
 #                 (the default fails)
 # {jobs} in a command is the number of parallel jobs.
 #
-# Quick stages are the inner loop: keep their total under [budget]
+# Quick stages are the inner loop: keep their total under [budget].quick seconds, or
+# nobody will run them. Everything that needs a build, a browser, a database, a network
+# or real time belongs in the full tier.
+
+[budget]
 quick = 10
 full = 120
 
