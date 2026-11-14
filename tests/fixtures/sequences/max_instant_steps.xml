@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- max_instant_steps: "spin" loops without ever waiting (it would hang the
-     game); "five" is five instant commands; "counted" runs 401 instant
+     game); "five" is five instant commands; "counted" runs 601 instant
      commands and ends; "chunks" runs 4, 4 and 3 commands with a wait between. -->
 <data>
 	<sequence name="spin">

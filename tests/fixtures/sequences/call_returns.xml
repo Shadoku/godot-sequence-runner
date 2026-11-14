@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- call var= stores a return value (await on a plain value goes on at once);
+<!-- call var= stores a return value (await on a plain value goes on at once).
      call await="true" waits for a returned signal, then for a coroutine whose
      final return value var= stores. -->
 <data>

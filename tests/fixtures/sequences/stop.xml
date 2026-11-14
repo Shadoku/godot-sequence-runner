@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- stop(): "loop" pings forever with a wait between (a patrol); "self_stop"
+<!-- stop(): "loop" pings forever with a wait between (a patrol). "self_stop"
      stops itself, so its second ping never runs. -->
 <data>
 	<sequence name="loop">

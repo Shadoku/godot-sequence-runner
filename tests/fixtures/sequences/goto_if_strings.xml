@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- goto_if on strings: eq and != compare $element as a string (records 1 for
-     fire, 0 then 2 otherwise); "bad" orders strings with ">", an error that
+     fire, 0 then 2 otherwise). "bad" orders strings with ">", an error that
      jumps nowhere. -->
 <data>
 	<sequence>

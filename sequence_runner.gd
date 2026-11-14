@@ -5,10 +5,10 @@ static var xml_cache: Dictionary = {}
 static var trigger_cache: Dictionary = {}
 ## Label maps: path -> {section name -> {label -> command index}}.
 static var label_cache: Dictionary = {}
-## What reading a file found wrong (a duplicate section...): path -> its problems.
+## Problems found reading a file (a duplicate section...): path -> its problems.
 static var problem_cache: Dictionary = {}
 
-#Reusable sequence runner. Attach to node, set xml_path, then call start()
+# Reusable sequence runner. Attach to a node, set xml_path, call start().
 
 ## The XML sequence file start() runs when it is given no path.
 @export_file("*.xml") var xml_path: String = ""
@@ -19,11 +19,11 @@ static var problem_cache: Dictionary = {}
 ## Print what the runner does (its target, each goto's jump) for debugging.
 @export var verbose: bool = false
 ## Stop the sequence at its first run-time error (run_error()) and set `failed`.
-## Off: a run-time error is reported and the sequence carries on.
+## Off: a run-time error is reported and the sequence goes on.
 @export var stop_on_error: bool = false
 ## The most commands a sequence may run without waiting (an async command)
 ## before it is stopped with an error and `failed`, whatever stop_on_error
-## says: a loop that never waits would hang the game. The count restarts each
+## says. A loop that never waits would hang the game. The count restarts each
 ## time the sequence waits. 0: no limit.
 @export var max_instant_steps: int = 100000
 
@@ -57,7 +57,7 @@ var stopped: bool = false
 var failed: bool = false
 
 var _commands_registered: bool = false
-# Bumped by every run_sequence() and stop(): a command's signal from an older
+# Bumped by every run_sequence() and stop(), so a command's signal from an old
 # run does not resume the loop.
 var _run_id: int = 0
 # The tween the playing tween_move runs, killed by stop().
@@ -79,9 +79,9 @@ static var _reference_regex: RegEx = null
 # What an expression calls its functions on (ExprScope), made on first use.
 var _expr_scope: ExprScope = null
 
-## An expression (a `set`'s or `set_prop`'s `expr`) as compile_expr() builds it:
-## its `$` references replaced by input names and parsed once, by Godot's
-## Expression; run_expr() resolves the references and executes it.
+## An expression (the `expr` of set, set_prop or if) as compile_expr() builds
+## it: its `$` references replaced by input names and parsed once, by Godot's
+## Expression. run_expr() resolves the references and executes it.
 class CompiledExpr extends RefCounted:
 	## The expression as written.
 	var text: String = ""
@@ -94,8 +94,8 @@ class CompiledExpr extends RefCounted:
 	var error: String = ""
 
 ## What an expression may call besides Godot's built-in functions: random(min,
-## max) and random_int(min, max), on the runner's rng. The runner itself is not
-## exposed, so a bare name is a clear error.
+## max) and random_int(min, max), on the runner's rng. A bare name is a clear
+## error, except the scope's `runner`.
 class ExprScope extends RefCounted:
 	var runner: sequence_runner
 
@@ -130,14 +130,14 @@ func _ready() -> void:
 	#pass # Replace with function body.
 	
 ## Runs the section `section` ("": the unnamed <sequence>) of the file at `path`
-## (or xml_path). `vars` seeds the scratch pad after its reset, so the sequence
+## (or xml_path). `vars` seed the scratch pad after its reset, so the sequence
 ## can read them as `$name`. Returns false, with an error, when the file has no
-## such section (or cannot be read): nothing runs and sequence_finished is not
+## such section or cannot be read: nothing runs and sequence_finished is not
 ## emitted.
 func start(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
 	return _start_section(path, vars, section, true)
 
-# start()'s work; `use_trigger` false plays the section at once whatever the
+# start()'s work. `use_trigger` false plays the section at once whatever the
 # file's <trigger> says (<run> and run_once()).
 func _start_section(path: String, vars: Dictionary, section: String, use_trigger: bool) -> bool:
 	if not _commands_registered:
@@ -173,13 +173,13 @@ func _start_section(path: String, vars: Dictionary, section: String, use_trigger
 		run_sequence(sequence)
 	return true
 
-## A coroutine: start() with the same arguments, then waits for
-## sequence_finished only if the sequence is still running, so
+## A coroutine: calls start() with the same arguments, then waits for
+## sequence_finished only if the sequence still runs, so
 ## `await runner.start_and_wait(...)` never hangs on a section of instant
 ## commands (it finishes inside start()). Returns false at once when start()
 ## does (no such section, no file), true once the sequence has finished or was
 ## stopped. A file whose <trigger> defers the start (signal, timer) is not
-## waited for: it returns true at once and the sequence plays later.
+## waited for. It returns true at once and the sequence plays later.
 func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = "") -> bool:
 	if not start(path, vars, section):
 		return false
@@ -187,8 +187,8 @@ func start_and_wait(path: String = "", vars: Dictionary = {}, section: String = 
 		await sequence_finished
 	return true
 
-## How deep `<run>` may nest sub-sequences (a section that runs itself...): the
-## runner a game starts is depth 0, its `<run>` child depth 1, and so on; a
+## How deep `<run>` may nest sub-sequences (a section that runs itself...). The
+## runner a game starts is depth 0, its `<run>` child depth 1, and so on. A
 ## `<run>` that would go deeper is a run-time error and runs nothing.
 const MAX_RUN_DEPTH: int = 32
 
@@ -240,8 +240,8 @@ static func run_once(host: Node, path: String, vars: Dictionary = {}, section: S
 	return ok
 
 #sequence_runner.attach($node, "res://data/sequences/whatever.xml")
-## `vars` seed the scratch pad and `section` picks the section when `auto` starts
-## the runner here.
+## Adds a runner for `xml` to `node`. `auto` starts it there with start()'s
+## `vars` and `section`.
 static func attach(node: Node, xml: String, auto: bool = false, vars: Dictionary = {}, section: String = "") -> sequence_runner:
 	var runner := sequence_runner.new()
 	runner.xml_path = xml
@@ -283,7 +283,7 @@ func register_commands() -> void:
 	register_command("stop", factory_stop, PackedStringArray())
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
 
-## Registers the command `cmd_name`: `factory(args: Dictionary, index: int) ->
+## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from an element's attributes, and `attributes` are the
 ## ones it accepts (an entry ending in `*` stands for that prefix followed by
 ## digits: call's `arg*` takes arg0, arg1...). Any other attribute is a compile
@@ -335,8 +335,8 @@ func validate(path: String) -> PackedStringArray:
 	return problems
 
 ## Reports a problem found while compiling (a factory calls it for a bad
-## attribute value): counted in compile_errors, and pushed as an error unless
-## validate() is collecting them.
+## attribute value). It is counted in compile_errors and pushed as an error
+## unless validate() is collecting.
 func compile_error(message: String) -> void:
 	compile_errors += 1
 	var line := "%s:%s: %s" % [_compile_path, _compile_section, message]
@@ -368,11 +368,11 @@ static func label_map(parsed: Array[Dictionary]) -> Dictionary:
 ## Compiles a section's commands into callables, each through its registered
 ## factory (a label is a no-op, so indices match the commands'). Blocks are
 ## paired first (an <if> with its <else/> and end marker, a <for_each> with its
-## end marker), so their factories know where to jump; a block's end marker
-## compiles to its loop-back or a no-op. Its problems (an unknown command or
+## end marker), so their factories know where to jump. A block's end marker
+## compiles to its loop-back or a no-op. Problems (an unknown command or
 ## attribute, a goto or goto_if to a label the section lacks, an <else/>
 ## outside an <if>) go through compile_error() and are counted in
-## compile_errors; an unknown command compiles to a no-op.
+## compile_errors. An unknown command compiles to a no-op.
 func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 	compile_errors = 0
 	var section_labels := label_map(parsed)
@@ -606,7 +606,7 @@ func cmd_set_prop(on: String, prop: String, value_token: String, expr: String) -
 		write_property_path(root, prop, value)
 		return null
 
-## goto_if's word aliases of its comparison operators: an XML attribute cannot
+## Word aliases of goto_if's comparison operators. An XML attribute cannot
 ## hold a bare `<`, so `op="lt"` reads as `op="<"`, and so on.
 const GOTO_IF_OP_ALIASES := {"lt": "<", "gt": ">", "le": "<=", "ge": ">="}
 
@@ -681,11 +681,11 @@ func cmd_tween_move(x_token: String, y_token: String, dur_token: String) -> Call
 		_tween = tween
 		return tween.finished
 
-## Ends the running sequence: no further command runs (one waiting is
+## Ends the running sequence. No further command runs (one waiting is
 ## abandoned, a tween_move's tween killed, a playing `<run>` child stopped and
 ## freed), `running` turns false, `stopped` true, and sequence_finished is
-## emitted at once, as at the end, so a host
-## waiting on it never hangs. Does nothing when no sequence is running.
+## emitted at once, as at the end, so a host waiting on it never hangs. Does
+## nothing when no sequence is running.
 func stop() -> void:
 	if not running:
 		return
@@ -772,11 +772,11 @@ func parse_xml(path: String) -> Dictionary:
 
 ## Reads the file at `path` once (cached): section name -> its commands
 ## ({"name": element, "args": {attribute: value}}), the unnamed <sequence> under
-## "", in file order, flat (a nested element is the next command); an <if> or a
+## "", in file order, flat (a nested element is the next command). An <if> or a
 ## <for_each> is followed, where it ends, by an end marker command (`end_if`,
-## `end_for_each`, no attributes); its <trigger> goes to trigger_cache. A second section of
-## the same name is dropped as a problem (problem_cache). Empty for a file that
-## cannot be read: an error unless `quiet`.
+## `end_for_each`, no attributes). Its <trigger> goes to trigger_cache. A second
+## section of the same name is dropped as a problem (problem_cache). Empty for a
+## file that cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	if xml_cache.has(path):
 		return xml_cache[path]
@@ -884,8 +884,8 @@ static func reference_regex() -> RegEx:
 
 ## Compiles the expression `text`: every `$` reference (a variable or a path, as
 ## any token reads one) becomes an input of a Godot Expression, parsed once.
-## `ok` is false, with `error`, when the text does not parse (what Expression
-## sees: syntax; an unknown function or member shows when it runs).
+## `ok` is false, with `error`, when the text does not parse. Expression sees
+## syntax only: an unknown function or member shows when it runs.
 static func compile_expr(text: String) -> CompiledExpr:
 	var compiled := CompiledExpr.new()
 	compiled.text = text
@@ -908,8 +908,8 @@ static func compile_expr(text: String) -> CompiledExpr:
 		compiled.error = compiled.expression.get_error_text()
 	return compiled
 
-## A command's `expr` compiled while its section is (the factories run then):
-## a syntax error is a compile_error() naming the command, listed by
+## Compiles a command's `expr` with its section (the factories run then).
+## A syntax error is a compile_error() naming the command, listed by
 ## validate(). Null when `expr` is empty.
 func compile_command_expr(cmd_name: String, expr: String) -> CompiledExpr:
 	if expr == "":
@@ -922,7 +922,7 @@ func compile_command_expr(cmd_name: String, expr: String) -> CompiledExpr:
 ## Runs a compiled expression: each reference resolved (resolve_value(), its
 ## errors as a token's) and typed by expr_input(), then executed against an
 ## ExprScope. A failure (an unknown function, a member the Expression cannot
-## read, `'a' + 1`, an int divided by zero) is an error and reads as 0; so is a
+## read, `'a' + 1`, an int divided by zero) is an error and reads as 0. So is a
 ## float result that is not finite (a float divided by zero), so a division by
 ## zero never passes as inf. The text is never the value.
 func run_expr(compiled: CompiledExpr) -> Variant:
@@ -958,7 +958,7 @@ static func expr_input(value: Variant) -> Variant:
 	return typed
 
 ## Evaluates the expression `text` in one go, for code that has only a string
-## (a set's expr is compiled with its section instead): a syntax error is a
+## (a set's expr is compiled with its section instead). A syntax error is a
 ## run-time error here.
 func evaluate_expr(text: String) -> Variant:
 	return run_expr(compile_expr(text))
@@ -1071,9 +1071,9 @@ static func to_float(value: Variant) -> float:
 ## The value at `path` (`body.radius`, `target.global_position.x`,
 ## `piece.props.health`, `hand.0`): its head found by path_root(), then per
 ## segment an Object's property, a Dictionary's key, a Vector2 / Vector3
-## component or an Array's index (read_member()). A path of one segment is the head itself (`$target`).
-## Null, with an error, when the head or a segment cannot be found (a missing
-## dictionary key is one).
+## component or an Array's index (read_member()). A path of one segment is the
+## head itself (`$target`). Null, with an error, when the head or a segment
+## cannot be found (a missing dictionary key is one).
 func resolve_property_path(path: String) -> Variant:
 	var parts := path.split(".")
 	var current: Variant = path_root(parts[0])
@@ -1148,11 +1148,11 @@ static func _path_index(container: Variant, key: String) -> int:
 
 ## Writes `value` at the path `prop` (`gravity_scale`, `props.health`,
 ## `position.x`, `tags.0`) from `root` (an Object, a Dictionary or an Array).
-## Every segment but the last is read (read_member()); the last is an Object's
+## Every segment but the last is read (read_member()). The last is an Object's
 ## property, a Dictionary's key (created when missing), a Vector2 / Vector3
-## component or an Array's index within its size, and
-## a value read on the way (a vector) is written back into its parent. False,
-## with an error, when a segment cannot be read or written.
+## component or an Array's index within its size. A value read on the way (a
+## vector) is written back into its parent. False, with an error, when a
+## segment cannot be read or written.
 func write_property_path(root: Variant, prop: String, value: Variant) -> bool:
 	var written := write_path(root, prop.split("."), 0, value)
 	if not written[0]:
@@ -1224,7 +1224,7 @@ static func write_member(container: Variant, key: String, value: Variant) -> Arr
 					return [true, v3]
 	return [false, container]
 	
-#Factories
+# Factories
 
 func factory_move(args: Dictionary, _index: int) -> Callable:
 	var x := str(args.get("x", "0"))

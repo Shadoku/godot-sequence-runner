@@ -1,6 +1,6 @@
 extends TestCase
 ## stop_on_error, failed and <stop/>. Off (the default) a run-time error is
-## reported and the sequence carries on, as before; on, the first one sets
+## reported and the sequence goes on, as before. On, the first one sets
 ## `failed` and stops the sequence, and the command that met it has no side
 ## effect. <stop/> stops the sequence without failing it.
 ## Fixture: stop_on_error.xml.

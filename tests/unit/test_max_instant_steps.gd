@@ -1,7 +1,7 @@
 extends TestCase
 ## max_instant_steps: a sequence that runs more commands than this without
 ## waiting is stopped with an error and `failed`, whatever stop_on_error says,
-## instead of hanging the game. The count restarts each time the sequence waits;
+## instead of hanging the game. The count restarts each time the sequence waits.
 ## 0 disables the cap. Fixture: max_instant_steps.xml.
 
 const FILE: String = "res://fixtures/sequences/max_instant_steps.xml"

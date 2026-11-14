@@ -2,7 +2,7 @@
 <!-- goto_if's word aliases lt, gt, le, ge (an XML attribute cannot hold a bare
      "<"): $a against $b, recording 1 when lt jumps, 2 for gt, 3 for le, 4 for
      ge. "strings" orders strings with lt, an error that jumps nowhere (a ping
-     follows); "unknown" names an operator the runner lacks, an error too. -->
+     follows). "unknown" names an operator the runner lacks, an error too. -->
 <data>
 	<sequence>
 		<goto_if label="lt" var="$a" op="lt" value="$b" />

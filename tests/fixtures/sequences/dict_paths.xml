@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Paths through dictionaries: an object's dictionary property ($piece.props)
-     and a scratch-pad dictionary ($stats), read; "missing" reads a key that is
+     and a scratch-pad dictionary ($stats), read. "missing" reads a key that is
      not there (an error, null) and goes on. -->
 <data>
 	<sequence>

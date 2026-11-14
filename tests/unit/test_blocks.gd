@@ -53,7 +53,7 @@ func before_each() -> void:
 	host = Recorder.new()
 	add_child(host)
 
-## Runs the section `section` of `file` with `vars`; the numbers recorded.
+## Runs `section` of `file` with `vars`. Returns the numbers recorded.
 func _rolls(section: String, vars: Dictionary = {}, file: String = "blocks.xml") -> Array[int]:
 	host.rolls.clear()
 	sequence_runner.attach(host, DIR + file).start("", vars, section)
