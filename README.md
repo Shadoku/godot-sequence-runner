@@ -126,6 +126,7 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
 | `gosub` | `label` | Jump to a label and remember where from (see [Subroutines](#subroutines)) |
 | `return` | — | Go on after the last `gosub` |
+| `choose` | `<option goto weight />` children | Jump to one option's label at random, by weight (see [Random Jumps](#random-jumps)) |
 | `if` … `else` … `/if` | `expr` | Run the commands inside when the [expression](#expressions) holds, else those after `<else/>` (optional; see [Blocks](#blocks)) |
 | `else` | — | Inside an `<if>`: starts the part that runs when `expr` does not hold |
 | `for_each` … `/for_each` | `var`, `in`, `index` (optional) | Run the commands inside once per element of an array (see [Blocks](#blocks)) |
@@ -342,6 +343,24 @@ Loop state is in the runner (per `<for_each>`), not in the scratch pad, and `sta
 **How it is read.** The reader stays flat. Only `<if>` and `<for_each>` get an extra command, an end marker (`end_if`, `end_for_each`), where they end (at once when self-closed, so `<if expr="..." />` is an empty block). Every other element reads as before, nested or not: `<wait seconds="1"></wait>` is one `wait`, and an element nested in another is the next command. The compiler pairs `<if>`, `<else/>` and the end markers with a stack. The end marker names `end_if` and `end_for_each` are therefore taken. Do not write them as elements.
 
 **A subclass's own `if` or `for_each`.** A subclass that registers a command named `if` or `for_each` (after `super.register_commands()`) keeps it. Its factory builds the command as any other, and that name's end markers compile to no-ops without a compile error. `<else/>` stays the built-in one, so with a subclass's own `if` it is reported as outside an `<if>` unless the subclass registers `else` too.
+
+### Random Jumps
+
+`<choose>` jumps to the label of one of its `<option>`s, picked at random:
+
+```xml
+<choose>
+  <option weight="3" goto="patrol_left" />
+  <option weight="3" goto="patrol_right" />
+  <option goto="idle" />
+</choose>
+```
+
+- An option's chance is its `weight` over the sum of all the weights: 3 in 7 for each patrol above, 1 in 7 for `idle`. `weight` is a token (`weight="$anger"`) and defaults to 1. An option of weight 0 or less is never picked.
+- The pick comes from the runner's `rng`, so a seeded one repeats it ([Random Values](#random-values)).
+- When no option has a weight above 0, that is a run-time error and nothing jumps.
+- A `<choose>` without an `<option>`, an option whose `goto` names a label the section lacks, and any other element inside a `<choose>` are compile errors.
+- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. `OPTION_PARENTS` names the commands read this way.
 
 ### Subroutines
 
@@ -717,6 +736,9 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<gosub label />`, `<return />` | commands | [Subroutines](#subroutines) |
 | `factory_gosub()`, `factory_return()` | methods (the commands' factories) | [Subroutines](#subroutines) |
 | `MAX_GOSUB_DEPTH` | constant (int, `64`) | [Subroutines](#subroutines) |
+| `<choose>` with `<option goto weight />` | command | [Random Jumps](#random-jumps) |
+| `factory_choose()` | method (the command's factory) | [Random Jumps](#random-jumps) |
+| `OPTION_PARENTS`, `OPTIONS_ARG` | constants (the commands with `<option>` children; the key of the options in their arguments) | [Random Jumps](#random-jumps) |
 
 Without a new name:
 

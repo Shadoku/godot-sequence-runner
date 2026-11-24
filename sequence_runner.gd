@@ -288,6 +288,7 @@ func register_commands() -> void:
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
 	register_command("gosub", factory_gosub, PackedStringArray(["label"]))
 	register_command("return", factory_return, PackedStringArray())
+	register_command("choose", factory_choose, PackedStringArray([OPTIONS_ARG]))
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -395,6 +396,10 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 			check_attributes(cmd_name, args, command_attributes[cmd_name])
 		if (cmd_name == "goto" or cmd_name == "goto_if" or cmd_name == "gosub") and not section_labels.has(str(args.get("label", ""))):
 			compile_error("<%s> to a label the section lacks: \"%s\"" % [cmd_name, args.get("label", "")])
+		if args.get(OPTIONS_ARG) is Array:
+			for option: Dictionary in args[OPTIONS_ARG]:
+				if not section_labels.has(str(option.get("goto", ""))):
+					compile_error("<%s>: an <option> goes to a label the section lacks: \"%s\"" % [cmd_name, option.get("goto", "")])
 		var factory: Callable = command_factories[cmd_name]
 		result.append(factory.call(args, result.size()))
 	return result
@@ -761,7 +766,10 @@ func parse_xml(path: String) -> Dictionary:
 ## ({"name": command, "args": {attribute: value}}), the unnamed <sequence> under
 ## "", in file order, flat (a nested element is the next command). An <if> or a
 ## <for_each> is followed, where it ends, by an end marker (`end_if`,
-## `end_for_each`, no attributes). Its <trigger> goes to trigger_cache. A second
+## `end_for_each`, no attributes). The <option> elements inside a <choose> are
+## not commands: their attributes are listed, in order, under OPTIONS_ARG in
+## the <choose>'s "args" (any other element in there is dropped as a compile
+## error). Its <trigger> goes to trigger_cache. A second
 ## section of the same name is dropped as a compile error (problem_cache). Empty
 ## for a file that cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
@@ -777,6 +785,9 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
 	var found_sequence := false
+	# The <choose> being read ("": none) and its options so far.
+	var option_parent: String = ""
+	var options: Array[Dictionary] = []
 	while parser.read() == OK:
 		if parser.get_node_type() == XMLParser.NODE_ELEMENT:
 			var node_name := parser.get_node_name()
@@ -805,6 +816,17 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 				for arg: int in range(parser.get_attribute_count()):
 					arguments[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
 
+				if option_parent != "":
+					if node_name == "option":
+						options.append(arguments)
+					else:
+						problems.append("<%s> inside a <%s> (ignored): only <option> belongs there" % [node_name, option_parent])
+					continue
+				if OPTION_PARENTS.has(node_name):
+					options = []
+					arguments[OPTIONS_ARG] = options
+					if not parser.is_empty():
+						option_parent = node_name
 				commands.append({
 					"name": node_name,
 					"args": arguments
@@ -814,6 +836,9 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 		elif parser.get_node_type() == XMLParser.NODE_ELEMENT_END:
 			if parser.get_node_name() == "sequence":
 				found_sequence = false
+				option_parent = ""
+			elif parser.get_node_name() == option_parent:
+				option_parent = ""
 			elif found_sequence and _BLOCK_ENDS.has(parser.get_node_name()):
 				commands.append({"name": _BLOCK_ENDS[parser.get_node_name()], "args": {}})
 	if result.is_empty():
@@ -1508,6 +1533,51 @@ func factory_return(_args: Dictionary, _index: int) -> Callable:
 		var frame: Dictionary = _gosub_stack.pop_back()
 		index = frame["index"]
 		_for_each_states = frame["loops"]
+		return null
+
+# Options: <choose> and its <option> children.
+
+## The commands whose `<option>` children the reader lists in their arguments
+## instead of reading them as commands.
+const OPTION_PARENTS: PackedStringArray = ["choose"]
+## The key of that list in the command's arguments: an Array of Dictionaries,
+## one per `<option>`, its attributes. No XML attribute can have this name.
+const OPTIONS_ARG: String = "<option>"
+
+## `<choose>` with `<option goto="..." weight="..."/>` children: jumps to one
+## option's label at random, on the runner's rng. An option's chance is its
+## `weight` (a token, default 1; 0 or less: never) over the sum of them all.
+## No option, or an option to a label the section lacks, is a compile error.
+## No weight above 0 is a run-time error and nothing jumps.
+func factory_choose(args: Dictionary, _index: int) -> Callable:
+	var options: Array = args.get(OPTIONS_ARG, [])
+	if options.is_empty():
+		compile_error("<choose> needs at least one <option>")
+	for option: Dictionary in options:
+		check_attributes("option", option, PackedStringArray(["goto", "weight"]))
+	return func() -> Variant:
+		var weights: Array[float] = []
+		var total: float = 0.0
+		for option: Dictionary in options:
+			var weight := maxf(to_float(resolve_value(str(option.get("weight", "1")))), 0.0)
+			weights.append(weight)
+			total += weight
+		if failed:
+			return null
+		if total <= 0.0:
+			run_error("choose: no option has a weight above 0")
+			return null
+		var roll := random(0.0, total)
+		var picked: int = -1
+		var passed: float = 0.0
+		for i: int in range(options.size()):
+			if weights[i] <= 0.0:
+				continue
+			picked = i
+			passed += weights[i]
+			if roll < passed:
+				break
+		jump(str(options[picked].get("goto", "")))
 		return null
 
 # Sub-sequences: <run>.
