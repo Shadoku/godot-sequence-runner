@@ -50,6 +50,11 @@ var compile_errors: int = 0
 ## A seeded generator makes the sequence's randomness reproducible.
 var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
+## What `<say>` and `<log>` show their text through: any object with the
+## methods `say(speaker: String, text: String)` and `log(text: String)` (see
+## factory_say() and factory_log()). Null, or a method it lacks: the text is
+## printed. A `<run>` child has its parent's.
+var presenter: Object = null
 
 ## Whether the last sequence was cut by stop() rather than run to its end.
 var stopped: bool = false
@@ -291,6 +296,8 @@ func register_commands() -> void:
 	register_command("choose", factory_choose, PackedStringArray([OPTIONS_ARG]))
 	register_command("call_return", factory_call_return, PackedStringArray(["on", "method", "var", "await", "arg*"]))
 	register_command("end", factory_end, PackedStringArray())
+	register_command("say", factory_say, PackedStringArray(["text", "speaker"]))
+	register_command("log", factory_log, PackedStringArray(["text"]))
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -1508,6 +1515,93 @@ func factory_end(_args: Dictionary, _index: int) -> Callable:
 		index = sequence.size()
 		return null
 
+# Text: <say> and <log>, and the {expression} placeholders of their text.
+
+# The regex of a text's placeholders, made on first use.
+static var _placeholder_regex: RegEx = null
+
+## Compiles a command's text (`<say>`'s, `<log>`'s) with its section: an
+## Array of its parts in order, a String for the text as written and a
+## CompiledExpr for each `{expression}` placeholder (an expression as set's).
+## A placeholder that does not parse is a compile_error() naming the command
+## `cmd_name` and its attribute `attribute`. run_text() makes the text.
+func compile_text(cmd_name: String, attribute: String, text: String) -> Array:
+	if _placeholder_regex == null:
+		_placeholder_regex = RegEx.new()
+		_placeholder_regex.compile("\\{([^{}]+)\\}")
+	var parts: Array = []
+	var last: int = 0
+	for found: RegExMatch in _placeholder_regex.search_all(text):
+		if found.get_start() > last:
+			parts.append(text.substr(last, found.get_start() - last))
+		var compiled := compile_expr(found.get_string(1))
+		if not compiled.ok:
+			compile_error("<%s> %s \"%s\": %s: %s" % [cmd_name, attribute, text, found.get_string(), compiled.error])
+		parts.append(compiled)
+		last = found.get_end()
+	if last < text.length():
+		parts.append(text.substr(last))
+	return parts
+
+## The text of compile_text()'s parts: each placeholder's expression run
+## (run_expr(), its errors as any expression's) and shown by display_text().
+func run_text(parts: Array) -> String:
+	var text := ""
+	for part: Variant in parts:
+		if part is CompiledExpr:
+			var compiled: CompiledExpr = part
+			if compiled.ok:
+				text += display_text(run_expr(compiled))
+		else:
+			text += str(part)
+	return text
+
+## A value as a text shows it: a float without a fraction as an integer (an
+## expression counts in floats, so `{$apples + 1}` reads "4", not "4.0"),
+## anything else as str() gives it.
+static func display_text(value: Variant) -> String:
+	if value is float and is_finite(value) and value == floorf(value) and absf(value) < 1e15:
+		return str(int(value))
+	return str(value)
+
+## `<say text="..." speaker="...">`: shows a line of dialogue through the
+## presenter's `say(speaker, text)`, `{expression}` placeholders filled in.
+## When say() returns a Signal or is a coroutine, the sequence waits for it
+## (the player pressing on); otherwise it goes on at once. Without a presenter
+## that has say(), the line is printed.
+func factory_say(args: Dictionary, _index: int) -> Callable:
+	var speaker_parts := compile_text("say", "speaker", str(args.get("speaker", "")))
+	var text_parts := compile_text("say", "text", str(args.get("text", "")))
+	return func() -> Variant:
+		var speaker := run_text(speaker_parts)
+		var text := run_text(text_parts)
+		if failed:
+			return null
+		if presenter == null or not presenter.has_method("say"):
+			print("[sequence] %s%s" % [speaker + ": " if speaker != "" else "", text])
+			return null
+		var result: Variant = presenter.callv("say", [speaker, text])
+		if result is Signal:
+			return result
+		if is_coroutine(result):
+			return Signal(result as Object, "completed")
+		return null
+
+## `<log text="...">`: hands a line to the presenter's `log(text)`,
+## `{expression}` placeholders filled in. Without a presenter that has log(),
+## the line is printed.
+func factory_log(args: Dictionary, _index: int) -> Callable:
+	var text_parts := compile_text("log", "text", str(args.get("text", "")))
+	return func() -> Variant:
+		var text := run_text(text_parts)
+		if failed:
+			return null
+		if presenter != null and presenter.has_method("log"):
+			presenter.callv("log", [text])
+		else:
+			print("[sequence] %s" % text)
+		return null
+
 # Subroutines: <gosub> and <return/>.
 
 ## How deep `<gosub>` may nest (a subroutine that calls itself...). A `<gosub>`
@@ -1646,6 +1740,7 @@ func _cmd_run_section(file_token: String, section_token: String, var_name: Strin
 		var child := (get_script() as Script).new() as sequence_runner
 		child.target = target
 		child.rng = rng
+		child.presenter = presenter
 		child.verbose = verbose
 		child.stop_on_error = stop_on_error
 		child.max_instant_steps = max_instant_steps

@@ -135,6 +135,8 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on an object. `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
 | `call_return` | `var`, `on`, `method`, `arg0`…`argN`, `await` | `call` with `var` required: call a method and keep what it returns. Without `var` it is a compile error |
+| `say` | `text`, `speaker` (optional) | Show a line of dialogue through the presenter and wait for it (see [Dialogue and Text](#dialogue-and-text)) |
+| `log` | `text` | Hand a line to the presenter's log |
 | `pause` | `time` (optional) | Pause the scene tree. With `time` above 0, unpause it after that many seconds and wait until then (async). Without `time`, it stays paused until `unpause`. A `time` of 0 or less pauses too and is a run-time error |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
@@ -471,6 +473,37 @@ Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`)
 
 Without `await`, a coroutine runs on by itself while the sequence goes on, and `var` holds `null` (the method has not returned yet).
 
+### Dialogue and Text
+
+`<say>` shows a line of dialogue and `<log>` records a line. The runner draws nothing itself: it hands the text to its **presenter**, an object of your game.
+
+```xml
+<say speaker="Tutor" text="You have {$apples} apples, {$name}." />
+<log text="{$name} was paid {$wage * 2} coins." />
+```
+
+```gdscript
+runner.presenter = $DialogueBox   # before start()
+```
+
+**Placeholders.** A `{...}` in `text` or `speaker` is an [expression](#expressions), replaced by its value when the command runs. A float without a fraction shows as an integer (`{$apples + 1}` is `4`, not `4.0`; `sequence_runner.display_text()` is that rule). A placeholder that does not parse is a compile error. One that fails when it runs is a run-time error, as any expression's.
+
+**The presenter** is any object with these methods. The runner calls them by name, so it needs no base class:
+
+```gdscript
+## Show one line. Return a Signal that fires when the player continues (or be a
+## coroutine that returns then): the sequence waits for it. Return nothing and
+## the sequence goes on at once.
+func say(speaker: String, text: String) -> Signal
+
+## Record a line (a log panel, a quest journal).
+func log(text: String) -> void
+```
+
+- Without a presenter, or with one that lacks the method, the line is printed (`[sequence] Tutor: You have 3 apples, Ann.`) and the sequence goes on. A sequence then runs unchanged in a test or a headless tool.
+- A `<run>` child uses its parent's presenter. `run_once()` and `attach()` make a runner without one: set `presenter` yourself.
+- `compile_text(cmd_name, attribute, text)` and `run_text(parts)` do the same for a command of your own ([Extending](#extending)): compile the text in the factory, run it in the command.
+
 ### Waiting for Signals
 
 `wait_signal` waits until an object emits a signal, so a sequence can wait for the game (a `call` followed by a `wait` cannot). `on` is resolved like `call`'s (`target` by default, `self`, a named object, or a path from `/root/`). If the object or the signal does not exist, it is a run-time error and the sequence carries on without waiting.
@@ -744,6 +777,11 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<call_return var on method arg0…argN await />` | command (`<call>` with `var` required) | [Calling Methods](#calling-methods) |
 | `<end />` | command | [Commands](#commands) |
 | `factory_call_return()`, `factory_end()` | methods (the commands' factories) | [Commands](#commands) |
+| `<say text speaker />`, `<log text />` | commands | [Dialogue and Text](#dialogue-and-text) |
+| `presenter` | member (Object, default `null`) | [Dialogue and Text](#dialogue-and-text) |
+| `factory_say()`, `factory_log()` | methods (the commands' factories) | [Dialogue and Text](#dialogue-and-text) |
+| `compile_text(cmd_name, attribute, text) -> Array`, `run_text(parts) -> String` | methods (a text's `{expression}` placeholders) | [Dialogue and Text](#dialogue-and-text) |
+| `display_text(value) -> String` | static method | [Dialogue and Text](#dialogue-and-text) |
 
 Without a new name:
 

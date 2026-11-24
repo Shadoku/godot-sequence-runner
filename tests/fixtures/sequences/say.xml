@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <say> and <log>: text handed to the runner's presenter, with {expression}
+     placeholders filled in. -->
+<data>
+	<sequence name="say">
+		<say speaker="{$who}" text="You have {$apples} apples, {$name}." />
+		<call method="ping" />
+	</sequence>
+	<sequence name="plain">
+		<say text="No speaker, no placeholder." />
+		<call method="ping" />
+	</sequence>
+	<sequence name="log">
+		<log text="{$apples + 1} is one more; half is {$apples / 2}; {'a' + 'b'}" />
+	</sequence>
+	<sequence name="runs">
+		<run section="log" />
+	</sequence>
+	<sequence name="unresolved">
+		<log text="{$missing} apples" />
+		<call method="ping" />
+	</sequence>
+</data>
