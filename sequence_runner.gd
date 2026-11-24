@@ -289,6 +289,8 @@ func register_commands() -> void:
 	register_command("gosub", factory_gosub, PackedStringArray(["label"]))
 	register_command("return", factory_return, PackedStringArray())
 	register_command("choose", factory_choose, PackedStringArray([OPTIONS_ARG]))
+	register_command("call_return", factory_call_return, PackedStringArray(["on", "method", "var", "await", "arg*"]))
+	register_command("end", factory_end, PackedStringArray())
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -1489,6 +1491,21 @@ func factory_for_each_block(args: Dictionary, at: int) -> Callable:
 func factory_stop(_args: Dictionary, _index: int) -> Callable:
 	return func() -> Variant:
 		stop()
+		return null
+
+## `<call_return var="..." method="..." ...>`: `<call>` with its `var`
+## required, for sequences written for runners that have the two apart. Without
+## `var` it is a compile error (and calls all the same).
+func factory_call_return(args: Dictionary, at: int) -> Callable:
+	if str(args.get("var", "")) == "":
+		compile_error("<call_return> needs var")
+	return factory_call(args, at)
+
+## `<end/>`: finishes the sequence here, as if it had run to its last command
+## (`stopped` and `failed` stay false; `<stop/>` is the one that stops it).
+func factory_end(_args: Dictionary, _index: int) -> Callable:
+	return func() -> Variant:
+		index = sequence.size()
 		return null
 
 # Subroutines: <gosub> and <return/>.

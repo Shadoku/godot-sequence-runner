@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <end/>: the sequence finishes here, as if it had run to its last command. -->
+<data>
+	<sequence name="early">
+		<call method="ping" />
+		<end />
+		<call method="ping" />
+	</sequence>
+	<sequence name="in_loop_and_gosub">
+		<for_each var="n" in="$list">
+			<gosub label="sub" />
+		</for_each>
+		<label name="sub" />
+		<call method="ping" />
+		<end />
+	</sequence>
+	<sequence name="after_wait">
+		<wait seconds="0.02" />
+		<end />
+		<call method="ping" />
+	</sequence>
+</data>

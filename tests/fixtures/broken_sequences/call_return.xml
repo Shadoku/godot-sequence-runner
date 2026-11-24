@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Broken on purpose: call_return without the variable it exists for. -->
+<sequence>
+	<call_return method="distance" />
+</sequence>

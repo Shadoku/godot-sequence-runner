@@ -134,9 +134,11 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on an object. `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
+| `call_return` | `var`, `on`, `method`, `arg0`…`argN`, `await` | `call` with `var` required: call a method and keep what it returns. Without `var` it is a compile error |
 | `pause` | `time` (optional) | Pause the scene tree. With `time` above 0, unpause it after that many seconds and wait until then (async). Without `time`, it stays paused until `unpause`. A `time` of 0 or less pauses too and is a run-time error |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
+| `end` | — | Finish the sequence here, as if it had run to its last command: `stopped` and `failed` stay `false`, `sequence_finished` is emitted |
 | `run` | `section`, `file` (optional), `var` (optional) | Run a section (of `file`, default the caller's file) on a child runner and wait for it. `var` gets its `$result` (see [Sub-sequences](#sub-sequences)) |
 
 ### Variables
@@ -739,6 +741,9 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<choose>` with `<option goto weight />` | command | [Random Jumps](#random-jumps) |
 | `factory_choose()` | method (the command's factory) | [Random Jumps](#random-jumps) |
 | `OPTION_PARENTS`, `OPTIONS_ARG` | constants (the commands with `<option>` children; the key of the options in their arguments) | [Random Jumps](#random-jumps) |
+| `<call_return var on method arg0…argN await />` | command (`<call>` with `var` required) | [Calling Methods](#calling-methods) |
+| `<end />` | command | [Commands](#commands) |
+| `factory_call_return()`, `factory_end()` | methods (the commands' factories) | [Commands](#commands) |
 
 Without a new name:
 
