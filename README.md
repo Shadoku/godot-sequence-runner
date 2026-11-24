@@ -137,6 +137,7 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `call_return` | `var`, `on`, `method`, `arg0`…`argN`, `await` | `call` with `var` required: call a method and keep what it returns. Without `var` it is a compile error |
 | `say` | `text`, `speaker` (optional) | Show a line of dialogue through the presenter and wait for it (see [Dialogue and Text](#dialogue-and-text)) |
 | `log` | `text` | Hand a line to the presenter's log |
+| `menu` | `<option text goto requires reason />` children | Show the options through the presenter, wait, and jump to the picked one's label (see [Dialogue and Text](#dialogue-and-text)) |
 | `pause` | `time` (optional) | Pause the scene tree. With `time` above 0, unpause it after that many seconds and wait until then (async). Without `time`, it stays paused until `unpause`. A `time` of 0 or less pauses too and is a run-time error |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
@@ -364,7 +365,7 @@ Loop state is in the runner (per `<for_each>`), not in the scratch pad, and `sta
 - The pick comes from the runner's `rng`, so a seeded one repeats it ([Random Values](#random-values)).
 - When no option has a weight above 0, that is a run-time error and nothing jumps.
 - A `<choose>` without an `<option>`, an option whose `goto` names a label the section lacks, and any other element inside a `<choose>` are compile errors.
-- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. `OPTION_PARENTS` names the commands read this way.
+- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. `OPTION_PARENTS` names the commands read this way (`choose` and `menu`).
 
 ### Subroutines
 
@@ -475,11 +476,15 @@ Without `await`, a coroutine runs on by itself while the sequence goes on, and `
 
 ### Dialogue and Text
 
-`<say>` shows a line of dialogue and `<log>` records a line. The runner draws nothing itself: it hands the text to its **presenter**, an object of your game.
+`<say>` shows a line of dialogue, `<menu>` lets the player pick an option, and `<log>` records a line. The runner draws nothing itself: it hands the text to its **presenter**, an object of your game.
 
 ```xml
 <say speaker="Tutor" text="You have {$apples} apples, {$name}." />
 <log text="{$name} was paid {$wage * 2} coins." />
+<menu>
+  <option text="Buy the {$item}" goto="buy" requires="$money >= 5" reason="Too expensive" />
+  <option text="Leave" goto="leave" />
+</menu>
 ```
 
 ```gdscript
@@ -498,9 +503,23 @@ func say(speaker: String, text: String) -> Signal
 
 ## Record a line (a log panel, a quest journal).
 func log(text: String) -> void
+
+## Show one button per option: {"text": String, "available": bool, "reason": String}.
+## Show an unavailable option disabled, with its reason. Return a Signal that fires
+## with the picked option's index (or be a coroutine that returns it): the sequence
+## waits for it. Returning the index at once works too.
+func menu(options: Array[Dictionary]) -> Signal
 ```
 
-- Without a presenter, or with one that lacks the method, the line is printed (`[sequence] Tutor: You have 3 apples, Ann.`) and the sequence goes on. A sequence then runs unchanged in a test or a headless tool.
+**Menus.** `<menu>` jumps to the `goto` label of the option the player picks:
+
+- `text` takes placeholders. `requires` is an expression: when it does not hold, the option is passed on as not available, with `reason` (default: `requires: ` and the expression).
+- When the presenter answers something that is not an available option, that is a run-time error and the first available option is taken.
+- When no option is available, that is a run-time error, the presenter is not asked and the sequence goes on after the menu.
+- A `<menu>` without an `<option>`, an option whose `goto` names a label the section lacks, a `requires` that does not parse, and any other element inside a `<menu>` are compile errors.
+- The options are listed in the command's arguments, as a `<choose>`'s are ([Random Jumps](#random-jumps)).
+
+- Without a presenter, or with one that lacks the method, a line is printed (`[sequence] Tutor: You have 3 apples, Ann.`) and a menu takes its first available option. A sequence then runs unchanged in a test or a headless tool.
 - A `<run>` child uses its parent's presenter. `run_once()` and `attach()` make a runner without one: set `presenter` yourself.
 - `compile_text(cmd_name, attribute, text)` and `run_text(parts)` do the same for a command of your own ([Extending](#extending)): compile the text in the factory, run it in the command.
 
@@ -782,9 +801,12 @@ Every public name added since the regression suite, so a subclass can check it d
 | `factory_say()`, `factory_log()` | methods (the commands' factories) | [Dialogue and Text](#dialogue-and-text) |
 | `compile_text(cmd_name, attribute, text) -> Array`, `run_text(parts) -> String` | methods (a text's `{expression}` placeholders) | [Dialogue and Text](#dialogue-and-text) |
 | `display_text(value) -> String` | static method | [Dialogue and Text](#dialogue-and-text) |
+| `<menu>` with `<option text goto requires reason />` | command | [Dialogue and Text](#dialogue-and-text) |
+| `factory_menu()` | method (the command's factory) | [Dialogue and Text](#dialogue-and-text) |
 
 Without a new name:
 
+- **`<option>` inside a `<choose>` or a `<menu>`** is no longer a command of the section: `read_sections()` lists it in that command's arguments ([Random Jumps](#random-jumps)). Before, a subclass with commands of its own named `choose` (or `menu`) and `option` got the options as the commands after it. An `<option>` anywhere else is read as before.
 - **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). A path that indexes an array was an error before.
 - **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 - **`<pause />` without `time`** pauses the scene tree until `<unpause />` and reports no error ([Commands](#commands)). It reported a run-time error before, and stopped the sequence with `stop_on_error` on. A `time` of 0 or less is still a run-time error.

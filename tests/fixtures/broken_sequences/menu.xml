@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Broken on purpose: one compile error per section. -->
+<data>
+	<sequence name="empty">
+		<menu />
+	</sequence>
+	<sequence name="missing_label">
+		<menu>
+			<option text="Go" goto="nowhere" />
+		</menu>
+	</sequence>
+	<sequence name="attribute">
+		<menu>
+			<option text="Go" goto="a" weight="2" />
+		</menu>
+		<label name="a" />
+	</sequence>
+	<sequence name="requires">
+		<menu>
+			<option text="Go" goto="a" requires="$money >=" />
+		</menu>
+		<label name="a" />
+	</sequence>
+</data>

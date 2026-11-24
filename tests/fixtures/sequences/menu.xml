@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <menu>: the presenter shows the options, the sequence jumps to the one
+     the player picks. -->
+<data>
+	<sequence name="shop">
+		<menu>
+			<option text="Buy the {$item}" goto="buy" requires="$money >= 5" reason="Too expensive" />
+			<option text="Haggle" goto="haggle" requires="$charm >= 2" />
+			<option text="Leave" goto="leave" />
+		</menu>
+		<set var="picked" value="'fell through'" />
+		<end />
+		<label name="buy" />
+		<set var="picked" value="'buy'" />
+		<end />
+		<label name="haggle" />
+		<set var="picked" value="'haggle'" />
+		<end />
+		<label name="leave" />
+		<set var="picked" value="'leave'" />
+	</sequence>
+	<sequence name="none_available">
+		<menu>
+			<option text="Buy" goto="buy" requires="$money >= 5" />
+		</menu>
+		<call method="ping" />
+		<end />
+		<label name="buy" />
+	</sequence>
+</data>

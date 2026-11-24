@@ -50,9 +50,10 @@ var compile_errors: int = 0
 ## A seeded generator makes the sequence's randomness reproducible.
 var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
-## What `<say>` and `<log>` show their text through: any object with the
-## methods `say(speaker: String, text: String)` and `log(text: String)` (see
-## factory_say() and factory_log()). Null, or a method it lacks: the text is
+## What `<say>`, `<log>` and `<menu>` show through: any object with the
+## methods `say(speaker: String, text: String)`, `log(text: String)` and
+## `menu(options: Array[Dictionary])` (see factory_say(), factory_log() and
+## factory_menu()). Null, or a method it lacks: the text is
 ## printed. A `<run>` child has its parent's.
 var presenter: Object = null
 
@@ -298,6 +299,7 @@ func register_commands() -> void:
 	register_command("end", factory_end, PackedStringArray())
 	register_command("say", factory_say, PackedStringArray(["text", "speaker"]))
 	register_command("log", factory_log, PackedStringArray(["text"]))
+	register_command("menu", factory_menu, PackedStringArray([OPTIONS_ARG]))
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -775,10 +777,10 @@ func parse_xml(path: String) -> Dictionary:
 ## ({"name": command, "args": {attribute: value}}), the unnamed <sequence> under
 ## "", in file order, flat (a nested element is the next command). An <if> or a
 ## <for_each> is followed, where it ends, by an end marker (`end_if`,
-## `end_for_each`, no attributes). The <option> elements inside a <choose> are
-## not commands: their attributes are listed, in order, under OPTIONS_ARG in
-## the <choose>'s "args" (any other element in there is dropped as a compile
-## error). Its <trigger> goes to trigger_cache. A second
+## `end_for_each`, no attributes). The <option> elements inside a <choose> or
+## a <menu> are not commands: their attributes are listed, in order, under
+## OPTIONS_ARG in that command's "args" (any other element in there is dropped
+## as a compile error). Its <trigger> goes to trigger_cache. A second
 ## section of the same name is dropped as a compile error (problem_cache). Empty
 ## for a file that cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
@@ -794,7 +796,7 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
 	var found_sequence := false
-	# The <choose> being read ("": none) and its options so far.
+	# The <choose> or <menu> being read ("": none) and its options so far.
 	var option_parent: String = ""
 	var options: Array[Dictionary] = []
 	while parser.read() == OK:
@@ -1602,6 +1604,77 @@ func factory_log(args: Dictionary, _index: int) -> Callable:
 			print("[sequence] %s" % text)
 		return null
 
+## `<menu>` with `<option text="..." goto="..." requires="..." reason="..."/>`
+## children: shows the options through the presenter's `menu(options)` and
+## jumps to the picked one's label. `options` is an Array[Dictionary], one
+## {"text" (placeholders filled in), "available" (bool), "reason" (String)}
+## per option in order: an option is available unless its `requires` (an
+## expression) does not hold, and `reason` then says why (default: `requires:
+## <the expression>`). menu() answers the picked option's index: as a Signal
+## that fires with it or as a coroutine that returns it (the sequence waits),
+## or at once. An answer that is not an available option is a run-time error
+## and the first available option is taken. So it is without a presenter that
+## has menu(), with no error. With no option available the menu is a run-time
+## error and nothing jumps. No option, or an option to a label the section
+## lacks, is a compile error.
+func factory_menu(args: Dictionary, _index: int) -> Callable:
+	var options: Array = args.get(OPTIONS_ARG, [])
+	if options.is_empty():
+		compile_error("<menu> needs at least one <option>")
+	var texts: Array[Array] = []
+	var requirements: Array[CompiledExpr] = []
+	for option: Dictionary in options:
+		check_attributes("option", option, PackedStringArray(["text", "goto", "requires", "reason"]))
+		texts.append(compile_text("menu", "text", str(option.get("text", ""))))
+		requirements.append(compile_command_expr("menu", str(option.get("requires", ""))))
+	return func() -> Variant:
+		var rows: Array[Dictionary] = []
+		var first: int = -1
+		for i: int in range(options.size()):
+			var available: bool = true
+			var required := requirements[i]
+			if required != null:
+				available = required.ok and (true if run_expr(required) else false)
+			var reason := ""
+			if not available:
+				reason = str(options[i].get("reason", "requires: %s" % options[i].get("requires", "")))
+			elif first < 0:
+				first = i
+			rows.append({"text": run_text(texts[i]), "available": available, "reason": reason})
+		if failed:
+			return null
+		if first < 0:
+			run_error("menu: no option is available; the menu is skipped")
+			return null
+		if presenter == null or not presenter.has_method("menu"):
+			jump(str(options[first].get("goto", "")))
+			return null
+		var answer: Variant = presenter.callv("menu", [rows])
+		if answer is Signal or is_coroutine(answer):
+			# callv() hands back the coroutine's state (as call's methods do).
+			var state: Object = callv("_await_menu_answer", [answer, options, rows, first, _run_id])
+			return Signal(state, "completed")
+		_take_menu_answer(answer, options, rows, first)
+		return null
+
+# Waits for a presenter's menu() (its Signal, or its coroutine's state), then
+# _take_menu_answer() if the run that asked is still the current one.
+func _await_menu_answer(pending: Variant, options: Array, rows: Array[Dictionary], first: int, run_id: int) -> void:
+	var answer: Variant = await (pending if pending is Signal else Signal(pending as Object, "completed"))
+	if run_id == _run_id:
+		_take_menu_answer(answer, options, rows, first)
+
+# Jumps to the option a presenter's menu() answered, or (a run-time error) to
+# `first`, the first available one, when the answer is not an available option.
+func _take_menu_answer(answer: Variant, options: Array, rows: Array[Dictionary], first: int) -> void:
+	var picked: int = int(answer) if (answer is int or answer is float) else -1
+	if picked < 0 or picked >= rows.size() or not rows[picked]["available"]:
+		run_error("menu: the presenter answered %s, which is not an available option; option %d is taken" % [answer, first])
+		if failed:
+			return
+		picked = first
+	jump(str(options[picked].get("goto", "")))
+
 # Subroutines: <gosub> and <return/>.
 
 ## How deep `<gosub>` may nest (a subroutine that calls itself...). A `<gosub>`
@@ -1646,11 +1719,11 @@ func factory_return(_args: Dictionary, _index: int) -> Callable:
 		_for_each_states = frame["loops"]
 		return null
 
-# Options: <choose> and its <option> children.
+# Options: <choose> and <menu>, and their <option> children.
 
 ## The commands whose `<option>` children the reader lists in their arguments
 ## instead of reading them as commands.
-const OPTION_PARENTS: PackedStringArray = ["choose"]
+const OPTION_PARENTS: PackedStringArray = ["choose", "menu"]
 ## The key of that list in the command's arguments: an Array of Dictionaries,
 ## one per `<option>`, its attributes. No XML attribute can have this name.
 const OPTIONS_ARG: String = "<option>"
