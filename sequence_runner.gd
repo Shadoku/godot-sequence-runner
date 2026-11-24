@@ -294,12 +294,12 @@ func register_commands() -> void:
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
 	register_command("gosub", factory_gosub, PackedStringArray(["label"]))
 	register_command("return", factory_return, PackedStringArray())
-	register_command("choose", factory_choose, PackedStringArray([OPTIONS_ARG]))
+	register_command("choose", factory_choose, PackedStringArray())
 	register_command("call_return", factory_call_return, PackedStringArray(["on", "method", "var", "await", "arg*"]))
 	register_command("end", factory_end, PackedStringArray())
 	register_command("say", factory_say, PackedStringArray(["text", "speaker"]))
 	register_command("log", factory_log, PackedStringArray(["text"]))
-	register_command("menu", factory_menu, PackedStringArray([OPTIONS_ARG]))
+	register_command("menu", factory_menu, PackedStringArray())
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -404,7 +404,12 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 			result.append(func() -> Variant: return null)
 			continue
 		if command_attributes.has(cmd_name):
-			check_attributes(cmd_name, args, command_attributes[cmd_name])
+			# The options the reader listed are not an attribute someone wrote.
+			var written: Dictionary = args
+			if args.has(OPTIONS_ARG):
+				written = args.duplicate()
+				written.erase(OPTIONS_ARG)
+			check_attributes(cmd_name, written, command_attributes[cmd_name])
 		if (cmd_name == "goto" or cmd_name == "goto_if" or cmd_name == "gosub") and not section_labels.has(str(args.get("label", ""))):
 			compile_error("<%s> to a label the section lacks: \"%s\"" % [cmd_name, args.get("label", "")])
 		if args.get(OPTIONS_ARG) is Array:

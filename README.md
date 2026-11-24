@@ -365,7 +365,7 @@ Loop state is in the runner (per `<for_each>`), not in the scratch pad, and `sta
 - The pick comes from the runner's `rng`, so a seeded one repeats it ([Random Values](#random-values)).
 - When no option has a weight above 0, that is a run-time error and nothing jumps.
 - A `<choose>` without an `<option>`, an option whose `goto` names a label the section lacks, and any other element inside a `<choose>` are compile errors.
-- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. `OPTION_PARENTS` names the commands read this way (`choose` and `menu`).
+- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. That list is not one of the command's attributes: `command_attributes` holds none for `choose` and `menu`, and `check_attributes()` is never handed it. `OPTION_PARENTS` names the commands read this way (`choose` and `menu`).
 
 ### Subroutines
 

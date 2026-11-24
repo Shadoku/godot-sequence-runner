@@ -62,6 +62,10 @@ func test_the_options_are_not_commands_of_the_section() -> void:
 	runner.start("", {}, "after")
 	assert_eq(host.pings, 1)
 
+func test_the_options_are_not_an_attribute_of_the_command() -> void:
+	assert_eq(runner.command_attributes["choose"], PackedStringArray())
+	assert_eq(runner.validate(FILE), PackedStringArray())
+
 func test_compile_errors() -> void:
 	var problems := "\n".join(runner.validate(BROKEN))
 	assert_eq(runner.compile_errors, 4, problems)
