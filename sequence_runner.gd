@@ -161,6 +161,7 @@ func _start_section(path: String, vars: Dictionary, section: String, use_trigger
 	scratch_pad = {}
 	scratch_pad.merge(vars)
 	_for_each_states = {}
+	_gosub_stack = []
 	var commands: Array[Dictionary] = parsed[section]
 	labels = label_map(commands)
 	if not label_cache.has(xml_path):
@@ -285,6 +286,8 @@ func register_commands() -> void:
 	register_command("for_each", factory_for_each_block, PackedStringArray(["var", "in", "index"]))
 	register_command("stop", factory_stop, PackedStringArray())
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
+	register_command("gosub", factory_gosub, PackedStringArray(["label"]))
+	register_command("return", factory_return, PackedStringArray())
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -390,7 +393,7 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 			continue
 		if command_attributes.has(cmd_name):
 			check_attributes(cmd_name, args, command_attributes[cmd_name])
-		if (cmd_name == "goto" or cmd_name == "goto_if") and not section_labels.has(str(args.get("label", ""))):
+		if (cmd_name == "goto" or cmd_name == "goto_if" or cmd_name == "gosub") and not section_labels.has(str(args.get("label", ""))):
 			compile_error("<%s> to a label the section lacks: \"%s\"" % [cmd_name, args.get("label", "")])
 		var factory: Callable = command_factories[cmd_name]
 		result.append(factory.call(args, result.size()))
@@ -1461,6 +1464,50 @@ func factory_for_each_block(args: Dictionary, at: int) -> Callable:
 func factory_stop(_args: Dictionary, _index: int) -> Callable:
 	return func() -> Variant:
 		stop()
+		return null
+
+# Subroutines: <gosub> and <return/>.
+
+## How deep `<gosub>` may nest (a subroutine that calls itself...). A `<gosub>`
+## that would go deeper is a run-time error and does not jump.
+const MAX_GOSUB_DEPTH: int = 64
+
+# The gosubs under way, the innermost last: {"index": the command its
+# <return/> goes on at, "loops": the for_each loops of the code that called
+# it}. Cleared by start().
+var _gosub_stack: Array[Dictionary] = []
+
+## `<gosub label="...">`: jumps to the label and remembers the command after
+## itself, where the next `<return/>` goes on. The for_each loops under way
+## are set aside until then, so the subroutine may sit outside them and jump
+## about without ending them. A label the section lacks is a compile error.
+func factory_gosub(args: Dictionary, _index: int) -> Callable:
+	var label := str(args.get("label", ""))
+	return func() -> Variant:
+		if not labels.has(label):
+			run_error("gosub: no label \"%s\" in the section" % label)
+			return null
+		if _gosub_stack.size() >= MAX_GOSUB_DEPTH:
+			run_error("gosub: more than %d nested gosubs (MAX_GOSUB_DEPTH); \"%s\" is not run" % [MAX_GOSUB_DEPTH, label])
+			return null
+		if verbose:
+			print("Gosub: ", label)
+		_gosub_stack.append({"index": index, "loops": _for_each_states})
+		_for_each_states = {}
+		index = labels[label]
+		return null
+
+## `<return/>`: goes on after the last `<gosub>` still open, with the for_each
+## loops it set aside. With no gosub open it is a run-time error and does
+## nothing.
+func factory_return(_args: Dictionary, _index: int) -> Callable:
+	return func() -> Variant:
+		if _gosub_stack.is_empty():
+			run_error("return: no gosub to return from")
+			return null
+		var frame: Dictionary = _gosub_stack.pop_back()
+		index = frame["index"]
+		_for_each_states = frame["loops"]
 		return null
 
 # Sub-sequences: <run>.

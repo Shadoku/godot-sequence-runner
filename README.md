@@ -124,6 +124,8 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `label` | `name` | Name a place `goto` and `goto_if` jump to |
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
+| `gosub` | `label` | Jump to a label and remember where from (see [Subroutines](#subroutines)) |
+| `return` | — | Go on after the last `gosub` |
 | `if` … `else` … `/if` | `expr` | Run the commands inside when the [expression](#expressions) holds, else those after `<else/>` (optional; see [Blocks](#blocks)) |
 | `else` | — | Inside an `<if>`: starts the part that runs when `expr` does not hold |
 | `for_each` … `/for_each` | `var`, `in`, `index` (optional) | Run the commands inside once per element of an array (see [Blocks](#blocks)) |
@@ -340,6 +342,35 @@ Loop state is in the runner (per `<for_each>`), not in the scratch pad, and `sta
 **How it is read.** The reader stays flat. Only `<if>` and `<for_each>` get an extra command, an end marker (`end_if`, `end_for_each`), where they end (at once when self-closed, so `<if expr="..." />` is an empty block). Every other element reads as before, nested or not: `<wait seconds="1"></wait>` is one `wait`, and an element nested in another is the next command. The compiler pairs `<if>`, `<else/>` and the end markers with a stack. The end marker names `end_if` and `end_for_each` are therefore taken. Do not write them as elements.
 
 **A subclass's own `if` or `for_each`.** A subclass that registers a command named `if` or `for_each` (after `super.register_commands()`) keeps it. Its factory builds the command as any other, and that name's end markers compile to no-ops without a compile error. `<else/>` stays the built-in one, so with a subclass's own `if` it is reported as outside an `<if>` unless the subclass registers `else` too.
+
+### Subroutines
+
+`<gosub>` jumps to a label like `goto`, and remembers the command after itself. `<return/>` goes on from there. Steps a section repeats can then be written once, in the same section and with the same variables:
+
+```xml
+<sequence>
+  <gosub label="swing" />
+  <call method="deal_damage" arg0="10" />
+  <wait seconds="0.5" />
+  <gosub label="swing" />
+  <call method="deal_damage" arg0="25" />
+  <stop />
+
+  <label name="swing" />
+  <play_anim anim="attack" />
+  <wait seconds="0.3" />
+  <return />
+</sequence>
+```
+
+- Keep the sequence from running into a subroutine: end the main part with `<stop/>` or a `goto` past it, as above.
+- Subroutines nest, up to `MAX_GOSUB_DEPTH` (64) deep. A `<gosub>` deeper than that is a run-time error and does not jump.
+- A `<gosub>` inside a `<for_each>` may call a subroutine outside the loop. The loop goes on with its next round after the `<return/>`, whatever the subroutine jumped to meanwhile.
+- A `<return/>` with no `<gosub>` open is a run-time error and does nothing.
+- A `<gosub>` to a label the section lacks is a compile error, as a `goto`'s is.
+- `start()` forgets the gosubs of the run before.
+
+To share steps between sections or files, or to run them with variables of their own, use `<run>` ([Sub-sequences](#sub-sequences)).
 
 ### Sub-sequences
 
@@ -683,6 +714,9 @@ Every public name added since the regression suite, so a subclass can check it d
 | `MAX_RUN_DEPTH` | constant (int, `32`) | [Sub-sequences](#sub-sequences) |
 | `TRIGGER_TYPES` | constant (the four `<trigger>` types) | [Triggers](#triggers) |
 | `run_once(host, path, vars, section, runner_script) -> bool` | static method (coroutine) | [Sub-sequences](#sub-sequences) |
+| `<gosub label />`, `<return />` | commands | [Subroutines](#subroutines) |
+| `factory_gosub()`, `factory_return()` | methods (the commands' factories) | [Subroutines](#subroutines) |
+| `MAX_GOSUB_DEPTH` | constant (int, `64`) | [Subroutines](#subroutines) |
 
 Without a new name:
 

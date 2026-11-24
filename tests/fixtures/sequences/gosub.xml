@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <gosub label> and <return/>: a jump that remembers where it came from. -->
+<data>
+	<sequence name="basic">
+		<set var="trace" value="'a'" />
+		<gosub label="sub" />
+		<set var="trace" expr="$trace + 'c'" />
+		<goto label="done" />
+		<label name="sub" />
+		<set var="trace" expr="$trace + 'b'" />
+		<return />
+		<label name="done" />
+	</sequence>
+	<sequence name="nested">
+		<set var="trace" value="''" />
+		<gosub label="outer" />
+		<set var="trace" expr="$trace + 'e'" />
+		<goto label="done" />
+		<label name="outer" />
+		<set var="trace" expr="$trace + 'a'" />
+		<gosub label="inner" />
+		<set var="trace" expr="$trace + 'c'" />
+		<gosub label="inner" />
+		<return />
+		<label name="inner" />
+		<set var="trace" expr="$trace + 'b'" />
+		<return />
+		<label name="done" />
+	</sequence>
+	<!-- The subroutine is outside the loop and jumps about itself: the loop
+	     that called it still runs every round. -->
+	<sequence name="in_loop">
+		<set var="sum" value="0" />
+		<for_each var="n" in="$list">
+			<gosub label="add" />
+		</for_each>
+		<goto label="done" />
+		<label name="add" />
+		<goto label="really_add" />
+		<label name="really_add" />
+		<set var="sum" expr="$sum + $n" />
+		<return />
+		<label name="done" />
+	</sequence>
+	<sequence name="waiting">
+		<gosub label="sub" />
+		<call method="ping" />
+		<goto label="done" />
+		<label name="sub" />
+		<wait seconds="0.02" />
+		<call method="ping" />
+		<return />
+		<label name="done" />
+	</sequence>
+	<sequence name="bare_return">
+		<return />
+		<call method="ping" />
+	</sequence>
+	<sequence name="too_deep">
+		<set var="n" value="0" />
+		<label name="again" />
+		<set var="n" expr="$n + 1" />
+		<gosub label="again" />
+		<label name="done" />
+	</sequence>
+	<!-- Ends inside a subroutine: the next start() begins with no gosub open. -->
+	<sequence name="leaves">
+		<gosub label="sub" />
+		<label name="sub" />
+		<call method="ping" />
+	</sequence>
+</data>
