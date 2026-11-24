@@ -679,6 +679,17 @@ func register_commands() -> void:
 
 A factory put straight into `command_factories` (`command_factories["scale"] = factory_scale`) still works. Its attributes are then not checked.
 
+**Playing another section in the same runner.** A subclass's command may swap `sequence`, `labels` and `index` to play another section in place of the running one, and swap them back at its end. The running section's `for_each` loops and open `gosub`s are kept by command index, so they must be set aside for that time, or the other section's jumps end them:
+
+```gdscript
+var caller: Dictionary = flow_state()   # the loops under way and the gosubs still open, a copy
+set_flow_state({})                      # the other section starts with none
+# ... swap sequence, labels and index; later, on the way back:
+set_flow_state(caller)
+```
+
+The built-in `<run>` needs none of this: it plays its section on a child runner ([Sub-sequences](#sub-sequences)).
+
 ## Errors and Validation
 
 Every error is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
@@ -803,6 +814,7 @@ Every public name added since the regression suite, so a subclass can check it d
 | `display_text(value) -> String` | static method | [Dialogue and Text](#dialogue-and-text) |
 | `<menu>` with `<option text goto requires reason />` | command | [Dialogue and Text](#dialogue-and-text) |
 | `factory_menu()` | method (the command's factory) | [Dialogue and Text](#dialogue-and-text) |
+| `flow_state() -> Dictionary`, `set_flow_state(state)` | methods (the running section's loops and open gosubs, to set aside and put back) | [Extending](#extending) |
 
 Without a new name:
 

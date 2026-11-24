@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- flow_state() / set_flow_state(): a subroutine and a loop that wait, so a
+     test can take the state while they are open. -->
+<data>
+	<sequence name="gosub">
+		<gosub label="sub" />
+		<call method="ping" />
+		<stop />
+		<label name="sub" />
+		<wait_signal signal="fired" />
+		<return />
+	</sequence>
+	<sequence name="loop">
+		<for_each var="n" in="$list">
+			<wait_signal signal="fired" />
+			<call method="ping" />
+		</for_each>
+	</sequence>
+</data>

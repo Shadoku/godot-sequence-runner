@@ -1724,6 +1724,20 @@ func factory_return(_args: Dictionary, _index: int) -> Callable:
 		_for_each_states = frame["loops"]
 		return null
 
+## The running section's flow state: its for_each loops under way and its
+## gosubs still open, as a copy that nothing run afterwards changes. For a
+## subclass that plays another section in this runner (it swaps `sequence`,
+## `labels` and `index`): take the state, set_flow_state({}) so the other
+## section starts with none of its caller's, and put it back on the way out.
+func flow_state() -> Dictionary:
+	return {"loops": _for_each_states.duplicate(true), "gosubs": _gosub_stack.duplicate(true)}
+
+## Puts back a state flow_state() gave (a copy of it); {} leaves no loop under
+## way and no gosub open.
+func set_flow_state(state: Dictionary) -> void:
+	_for_each_states = (state.get("loops", {}) as Dictionary).duplicate(true)
+	_gosub_stack.assign((state.get("gosubs", []) as Array).duplicate(true))
+
 # Options: <choose> and <menu>, and their <option> children.
 
 ## The commands whose `<option>` children the reader lists in their arguments
