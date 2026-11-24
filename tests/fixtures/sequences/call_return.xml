@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <call_return var method ...>: call, with the return value kept in var. -->
+<data>
+	<sequence name="stores">
+		<call_return var="dist" method="distance" />
+		<call_return var="sum" on="target" method="add" arg0="2" arg1="$dist" />
+	</sequence>
+	<sequence name="awaits">
+		<call_return var="late" method="later" await="true" />
+		<set var="seen" value="$late" />
+	</sequence>
+</data>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Broken on purpose: a placeholder that is not an expression. -->
+<sequence>
+	<say text="You have {1 +} apples" />
+</sequence>

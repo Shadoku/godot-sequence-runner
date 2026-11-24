@@ -124,6 +124,9 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `label` | `name` | Name a place `goto` and `goto_if` jump to |
 | `goto` | `label` | Jump to a label |
 | `goto_if` | `label`, `var`, `op`, `value` | Conditional jump (see below) |
+| `gosub` | `label` | Jump to a label and remember where from (see [Subroutines](#subroutines)) |
+| `return` | — | Go on after the last `gosub` |
+| `choose` | `<option goto weight />` children | Jump to one option's label at random, by weight (see [Random Jumps](#random-jumps)) |
 | `if` … `else` … `/if` | `expr` | Run the commands inside when the [expression](#expressions) holds, else those after `<else/>` (optional; see [Blocks](#blocks)) |
 | `else` | — | Inside an `<if>`: starts the part that runs when `expr` does not hold |
 | `for_each` … `/for_each` | `var`, `in`, `index` (optional) | Run the commands inside once per element of an array (see [Blocks](#blocks)) |
@@ -131,9 +134,14 @@ A section the file lacks makes `start()` return `false` with an error. Nothing r
 | `set_prop` | `on` (default `target`), `prop`, `value` or `expr` | Write a property, a dictionary key or a vector component by path (see [Writing Properties](#writing-properties)) |
 | `play_anim` | `anim`, `node_path` (optional) | Play an animation on the target or a child `AnimatedSprite2D` |
 | `call` | `on`, `method`, `arg0`…`argN`, `var`, `await` | Call a method on an object. `var` stores its return value, `await="true"` waits for it (see [Calling Methods](#calling-methods)) |
+| `call_return` | `var`, `on`, `method`, `arg0`…`argN`, `await` | `call` with `var` required: call a method and keep what it returns. Without `var` it is a compile error |
+| `say` | `text`, `speaker` (optional) | Show a line of dialogue through the presenter and wait for it (see [Dialogue and Text](#dialogue-and-text)) |
+| `log` | `text` | Hand a line to the presenter's log |
+| `menu` | `<option text goto requires reason />` children | Show the options through the presenter, wait, and jump to the picked one's label (see [Dialogue and Text](#dialogue-and-text)) |
 | `pause` | `time` (optional) | Pause the scene tree. With `time` above 0, unpause it after that many seconds and wait until then (async). Without `time`, it stays paused until `unpause`. A `time` of 0 or less pauses too and is a run-time error |
 | `unpause` | — | Unpause the scene tree |
 | `stop` | — | End the sequence, as `stop()` does: `stopped` turns `true`, `failed` stays `false`, `sequence_finished` is emitted |
+| `end` | — | Finish the sequence here, as if it had run to its last command: `stopped` and `failed` stay `false`, `sequence_finished` is emitted |
 | `run` | `section`, `file` (optional), `var` (optional) | Run a section (of `file`, default the caller's file) on a child runner and wait for it. `var` gets its `$result` (see [Sub-sequences](#sub-sequences)) |
 
 ### Variables
@@ -341,6 +349,53 @@ Loop state is in the runner (per `<for_each>`), not in the scratch pad, and `sta
 
 **A subclass's own `if` or `for_each`.** A subclass that registers a command named `if` or `for_each` (after `super.register_commands()`) keeps it. Its factory builds the command as any other, and that name's end markers compile to no-ops without a compile error. `<else/>` stays the built-in one, so with a subclass's own `if` it is reported as outside an `<if>` unless the subclass registers `else` too.
 
+### Random Jumps
+
+`<choose>` jumps to the label of one of its `<option>`s, picked at random:
+
+```xml
+<choose>
+  <option weight="3" goto="patrol_left" />
+  <option weight="3" goto="patrol_right" />
+  <option goto="idle" />
+</choose>
+```
+
+- An option's chance is its `weight` over the sum of all the weights: 3 in 7 for each patrol above, 1 in 7 for `idle`. `weight` is a token (`weight="$anger"`) and defaults to 1. An option of weight 0 or less is never picked.
+- The pick comes from the runner's `rng`, so a seeded one repeats it ([Random Values](#random-values)).
+- When no option has a weight above 0, that is a run-time error and nothing jumps.
+- A `<choose>` without an `<option>`, an option whose `goto` names a label the section lacks, and any other element inside a `<choose>` are compile errors.
+- The options are not commands. `read_sections()` lists them in the `<choose>`'s arguments under `OPTIONS_ARG` (`"<option>"`), one Dictionary of attributes each. That list is not one of the command's attributes: `command_attributes` holds none for `choose` and `menu`, and `check_attributes()` is never handed it. `OPTION_PARENTS` names the commands read this way (`choose` and `menu`).
+
+### Subroutines
+
+`<gosub>` jumps to a label like `goto`, and remembers the command after itself. `<return/>` goes on from there. Steps a section repeats can then be written once, in the same section and with the same variables:
+
+```xml
+<sequence>
+  <gosub label="swing" />
+  <call method="deal_damage" arg0="10" />
+  <wait seconds="0.5" />
+  <gosub label="swing" />
+  <call method="deal_damage" arg0="25" />
+  <stop />
+
+  <label name="swing" />
+  <play_anim anim="attack" />
+  <wait seconds="0.3" />
+  <return />
+</sequence>
+```
+
+- Keep the sequence from running into a subroutine: end the main part with `<stop/>` or a `goto` past it, as above.
+- Subroutines nest, up to `MAX_GOSUB_DEPTH` (64) deep. A `<gosub>` deeper than that is a run-time error and does not jump.
+- A `<gosub>` inside a `<for_each>` may call a subroutine outside the loop. The loop goes on with its next round after the `<return/>`, whatever the subroutine jumped to meanwhile.
+- A `<return/>` with no `<gosub>` open is a run-time error and does nothing.
+- A `<gosub>` to a label the section lacks is a compile error, as a `goto`'s is.
+- `start()` forgets the gosubs of the run before.
+
+To share steps between sections or files, or to run them with variables of their own, use `<run>` ([Sub-sequences](#sub-sequences)).
+
 ### Sub-sequences
 
 `<run>` runs another section and waits until it ends. A section run by `<run>` is a sub-sequence. Sections can then share steps (one section per card hook, a common "deal damage" section they all run):
@@ -418,6 +473,55 @@ Arguments are resolved like any token (`$var`, `random(...)`, `random_int(...)`)
 ```
 
 Without `await`, a coroutine runs on by itself while the sequence goes on, and `var` holds `null` (the method has not returned yet).
+
+### Dialogue and Text
+
+`<say>` shows a line of dialogue, `<menu>` lets the player pick an option, and `<log>` records a line. The runner draws nothing itself: it hands the text to its **presenter**, an object of your game.
+
+```xml
+<say speaker="Tutor" text="You have {$apples} apples, {$name}." />
+<log text="{$name} was paid {$wage * 2} coins." />
+<menu>
+  <option text="Buy the {$item}" goto="buy" requires="$money >= 5" reason="Too expensive" />
+  <option text="Leave" goto="leave" />
+</menu>
+```
+
+```gdscript
+runner.presenter = $DialogueBox   # before start()
+```
+
+**Placeholders.** A `{...}` in `text` or `speaker` is an [expression](#expressions), replaced by its value when the command runs. A float without a fraction shows as an integer (`{$apples + 1}` is `4`, not `4.0`; `sequence_runner.display_text()` is that rule). A placeholder that does not parse is a compile error. One that fails when it runs is a run-time error, as any expression's.
+
+**The presenter** is any object with these methods. The runner calls them by name, so it needs no base class:
+
+```gdscript
+## Show one line. Return a Signal that fires when the player continues (or be a
+## coroutine that returns then): the sequence waits for it. Return nothing and
+## the sequence goes on at once.
+func say(speaker: String, text: String) -> Signal
+
+## Record a line (a log panel, a quest journal).
+func log(text: String) -> void
+
+## Show one button per option: {"text": String, "available": bool, "reason": String}.
+## Show an unavailable option disabled, with its reason. Return a Signal that fires
+## with the picked option's index (or be a coroutine that returns it): the sequence
+## waits for it. Returning the index at once works too.
+func menu(options: Array[Dictionary]) -> Signal
+```
+
+**Menus.** `<menu>` jumps to the `goto` label of the option the player picks:
+
+- `text` takes placeholders. `requires` is an expression: when it does not hold, the option is passed on as not available, with `reason` (default: `requires: ` and the expression).
+- When the presenter answers something that is not an available option, that is a run-time error and the first available option is taken.
+- When no option is available, that is a run-time error, the presenter is not asked and the sequence goes on after the menu.
+- A `<menu>` without an `<option>`, an option whose `goto` names a label the section lacks, a `requires` that does not parse, and any other element inside a `<menu>` are compile errors.
+- The options are listed in the command's arguments, as a `<choose>`'s are ([Random Jumps](#random-jumps)).
+
+- Without a presenter, or with one that lacks the method, a line is printed (`[sequence] Tutor: You have 3 apples, Ann.`) and a menu takes its first available option. A sequence then runs unchanged in a test or a headless tool.
+- A `<run>` child uses its parent's presenter. `run_once()` and `attach()` make a runner without one: set `presenter` yourself.
+- `compile_text(cmd_name, attribute, text)` and `run_text(parts)` do the same for a command of your own ([Extending](#extending)): compile the text in the factory, run it in the command.
 
 ### Waiting for Signals
 
@@ -575,6 +679,17 @@ func register_commands() -> void:
 
 A factory put straight into `command_factories` (`command_factories["scale"] = factory_scale`) still works. Its attributes are then not checked.
 
+**Playing another section in the same runner.** A subclass's command may swap `sequence`, `labels` and `index` to play another section in place of the running one, and swap them back at its end. The running section's `for_each` loops and open `gosub`s are kept by command index, so they must be set aside for that time, or the other section's jumps end them:
+
+```gdscript
+var caller: Dictionary = flow_state()   # the loops under way and the gosubs still open, a copy
+set_flow_state({})                      # the other section starts with none
+# ... swap sequence, labels and index; later, on the way back:
+set_flow_state(caller)
+```
+
+The built-in `<run>` needs none of this: it plays its section on a child runner ([Sub-sequences](#sub-sequences)).
+
 ## Errors and Validation
 
 Every error is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
@@ -683,9 +798,27 @@ Every public name added since the regression suite, so a subclass can check it d
 | `MAX_RUN_DEPTH` | constant (int, `32`) | [Sub-sequences](#sub-sequences) |
 | `TRIGGER_TYPES` | constant (the four `<trigger>` types) | [Triggers](#triggers) |
 | `run_once(host, path, vars, section, runner_script) -> bool` | static method (coroutine) | [Sub-sequences](#sub-sequences) |
+| `<gosub label />`, `<return />` | commands | [Subroutines](#subroutines) |
+| `factory_gosub()`, `factory_return()` | methods (the commands' factories) | [Subroutines](#subroutines) |
+| `MAX_GOSUB_DEPTH` | constant (int, `64`) | [Subroutines](#subroutines) |
+| `<choose>` with `<option goto weight />` | command | [Random Jumps](#random-jumps) |
+| `factory_choose()` | method (the command's factory) | [Random Jumps](#random-jumps) |
+| `OPTION_PARENTS`, `OPTIONS_ARG` | constants (the commands with `<option>` children; the key of the options in their arguments) | [Random Jumps](#random-jumps) |
+| `<call_return var on method arg0…argN await />` | command (`<call>` with `var` required) | [Calling Methods](#calling-methods) |
+| `<end />` | command | [Commands](#commands) |
+| `factory_call_return()`, `factory_end()` | methods (the commands' factories) | [Commands](#commands) |
+| `<say text speaker />`, `<log text />` | commands | [Dialogue and Text](#dialogue-and-text) |
+| `presenter` | member (Object, default `null`) | [Dialogue and Text](#dialogue-and-text) |
+| `factory_say()`, `factory_log()` | methods (the commands' factories) | [Dialogue and Text](#dialogue-and-text) |
+| `compile_text(cmd_name, attribute, text) -> Array`, `run_text(parts) -> String` | methods (a text's `{expression}` placeholders) | [Dialogue and Text](#dialogue-and-text) |
+| `display_text(value) -> String` | static method | [Dialogue and Text](#dialogue-and-text) |
+| `<menu>` with `<option text goto requires reason />` | command | [Dialogue and Text](#dialogue-and-text) |
+| `factory_menu()` | method (the command's factory) | [Dialogue and Text](#dialogue-and-text) |
+| `flow_state() -> Dictionary`, `set_flow_state(state)` | methods (the running section's loops and open gosubs, to set aside and put back) | [Extending](#extending) |
 
 Without a new name:
 
+- **`<option>` inside a `<choose>` or a `<menu>`** is no longer a command of the section: `read_sections()` lists it in that command's arguments ([Random Jumps](#random-jumps)). Before, a subclass with commands of its own named `choose` (or `menu`) and `option` got the options as the commands after it. An `<option>` anywhere else is read as before.
 - **Array indices in property paths**: `$list.0`, `$card.tags.1`, and `set_prop`'s `prop="list.0"` ([Property Paths](#property-paths), [Writing Properties](#writing-properties)). `read_member()` and `write_member()` take an index for an `Array` (and `read_member()` for a packed array). A path that indexes an array was an error before.
 - **`&lt;` in expressions**: Godot's `XMLParser` decodes `&lt;`, `&gt;` and `&amp;` in attributes, so an `expr` can hold `<` ([Expressions](#expressions)).
 - **`<pause />` without `time`** pauses the scene tree until `<unpause />` and reports no error ([Commands](#commands)). It reported a run-time error before, and stopped the sequence with `stop_on_error` on. A `time` of 0 or less is still a run-time error.

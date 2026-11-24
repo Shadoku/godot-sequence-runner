@@ -50,6 +50,12 @@ var compile_errors: int = 0
 ## A seeded generator makes the sequence's randomness reproducible.
 var rng: RandomNumberGenerator = null
 var trigger_config: Dictionary = {}
+## What `<say>`, `<log>` and `<menu>` show through: any object with the
+## methods `say(speaker: String, text: String)`, `log(text: String)` and
+## `menu(options: Array[Dictionary])` (see factory_say(), factory_log() and
+## factory_menu()). Null, or a method it lacks: the text is
+## printed. A `<run>` child has its parent's.
+var presenter: Object = null
 
 ## Whether the last sequence was cut by stop() rather than run to its end.
 var stopped: bool = false
@@ -161,6 +167,7 @@ func _start_section(path: String, vars: Dictionary, section: String, use_trigger
 	scratch_pad = {}
 	scratch_pad.merge(vars)
 	_for_each_states = {}
+	_gosub_stack = []
 	var commands: Array[Dictionary] = parsed[section]
 	labels = label_map(commands)
 	if not label_cache.has(xml_path):
@@ -285,6 +292,14 @@ func register_commands() -> void:
 	register_command("for_each", factory_for_each_block, PackedStringArray(["var", "in", "index"]))
 	register_command("stop", factory_stop, PackedStringArray())
 	register_command("run", factory_run_section, PackedStringArray(["section", "file", "var"]))
+	register_command("gosub", factory_gosub, PackedStringArray(["label"]))
+	register_command("return", factory_return, PackedStringArray())
+	register_command("choose", factory_choose, PackedStringArray())
+	register_command("call_return", factory_call_return, PackedStringArray(["on", "method", "var", "await", "arg*"]))
+	register_command("end", factory_end, PackedStringArray())
+	register_command("say", factory_say, PackedStringArray(["text", "speaker"]))
+	register_command("log", factory_log, PackedStringArray(["text"]))
+	register_command("menu", factory_menu, PackedStringArray())
 
 ## Registers the command `cmd_name`. `factory(args: Dictionary, index: int) ->
 ## Callable` builds it from the command's attributes, and `attributes` are the
@@ -389,9 +404,18 @@ func compile_sequence(parsed: Array[Dictionary]) -> Array[Callable]:
 			result.append(func() -> Variant: return null)
 			continue
 		if command_attributes.has(cmd_name):
-			check_attributes(cmd_name, args, command_attributes[cmd_name])
-		if (cmd_name == "goto" or cmd_name == "goto_if") and not section_labels.has(str(args.get("label", ""))):
+			# The options the reader listed are not an attribute someone wrote.
+			var written: Dictionary = args
+			if args.has(OPTIONS_ARG):
+				written = args.duplicate()
+				written.erase(OPTIONS_ARG)
+			check_attributes(cmd_name, written, command_attributes[cmd_name])
+		if (cmd_name == "goto" or cmd_name == "goto_if" or cmd_name == "gosub") and not section_labels.has(str(args.get("label", ""))):
 			compile_error("<%s> to a label the section lacks: \"%s\"" % [cmd_name, args.get("label", "")])
+		if args.get(OPTIONS_ARG) is Array:
+			for option: Dictionary in args[OPTIONS_ARG]:
+				if not section_labels.has(str(option.get("goto", ""))):
+					compile_error("<%s>: an <option> goes to a label the section lacks: \"%s\"" % [cmd_name, option.get("goto", "")])
 		var factory: Callable = command_factories[cmd_name]
 		result.append(factory.call(args, result.size()))
 	return result
@@ -758,7 +782,10 @@ func parse_xml(path: String) -> Dictionary:
 ## ({"name": command, "args": {attribute: value}}), the unnamed <sequence> under
 ## "", in file order, flat (a nested element is the next command). An <if> or a
 ## <for_each> is followed, where it ends, by an end marker (`end_if`,
-## `end_for_each`, no attributes). Its <trigger> goes to trigger_cache. A second
+## `end_for_each`, no attributes). The <option> elements inside a <choose> or
+## a <menu> are not commands: their attributes are listed, in order, under
+## OPTIONS_ARG in that command's "args" (any other element in there is dropped
+## as a compile error). Its <trigger> goes to trigger_cache. A second
 ## section of the same name is dropped as a compile error (problem_cache). Empty
 ## for a file that cannot be read: an error unless `quiet`.
 static func read_sections(path: String, quiet: bool = false) -> Dictionary:
@@ -774,6 +801,9 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
 	var found_sequence := false
+	# The <choose> or <menu> being read ("": none) and its options so far.
+	var option_parent: String = ""
+	var options: Array[Dictionary] = []
 	while parser.read() == OK:
 		if parser.get_node_type() == XMLParser.NODE_ELEMENT:
 			var node_name := parser.get_node_name()
@@ -802,6 +832,17 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 				for arg: int in range(parser.get_attribute_count()):
 					arguments[parser.get_attribute_name(arg)] = parser.get_attribute_value(arg)
 
+				if option_parent != "":
+					if node_name == "option":
+						options.append(arguments)
+					else:
+						problems.append("<%s> inside a <%s> (ignored): only <option> belongs there" % [node_name, option_parent])
+					continue
+				if OPTION_PARENTS.has(node_name):
+					options = []
+					arguments[OPTIONS_ARG] = options
+					if not parser.is_empty():
+						option_parent = node_name
 				commands.append({
 					"name": node_name,
 					"args": arguments
@@ -811,6 +852,9 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 		elif parser.get_node_type() == XMLParser.NODE_ELEMENT_END:
 			if parser.get_node_name() == "sequence":
 				found_sequence = false
+				option_parent = ""
+			elif parser.get_node_name() == option_parent:
+				option_parent = ""
 			elif found_sequence and _BLOCK_ENDS.has(parser.get_node_name()):
 				commands.append({"name": _BLOCK_ENDS[parser.get_node_name()], "args": {}})
 	if result.is_empty():
@@ -1463,6 +1507,282 @@ func factory_stop(_args: Dictionary, _index: int) -> Callable:
 		stop()
 		return null
 
+## `<call_return var="..." method="..." ...>`: `<call>` with its `var`
+## required, for sequences written for runners that have the two apart. Without
+## `var` it is a compile error (and calls all the same).
+func factory_call_return(args: Dictionary, at: int) -> Callable:
+	if str(args.get("var", "")) == "":
+		compile_error("<call_return> needs var")
+	return factory_call(args, at)
+
+## `<end/>`: finishes the sequence here, as if it had run to its last command
+## (`stopped` and `failed` stay false; `<stop/>` is the one that stops it).
+func factory_end(_args: Dictionary, _index: int) -> Callable:
+	return func() -> Variant:
+		index = sequence.size()
+		return null
+
+# Text: <say> and <log>, and the {expression} placeholders of their text.
+
+# The regex of a text's placeholders, made on first use.
+static var _placeholder_regex: RegEx = null
+
+## Compiles a command's text (`<say>`'s, `<log>`'s) with its section: an
+## Array of its parts in order, a String for the text as written and a
+## CompiledExpr for each `{expression}` placeholder (an expression as set's).
+## A placeholder that does not parse is a compile_error() naming the command
+## `cmd_name` and its attribute `attribute`. run_text() makes the text.
+func compile_text(cmd_name: String, attribute: String, text: String) -> Array:
+	if _placeholder_regex == null:
+		_placeholder_regex = RegEx.new()
+		_placeholder_regex.compile("\\{([^{}]+)\\}")
+	var parts: Array = []
+	var last: int = 0
+	for found: RegExMatch in _placeholder_regex.search_all(text):
+		if found.get_start() > last:
+			parts.append(text.substr(last, found.get_start() - last))
+		var compiled := compile_expr(found.get_string(1))
+		if not compiled.ok:
+			compile_error("<%s> %s \"%s\": %s: %s" % [cmd_name, attribute, text, found.get_string(), compiled.error])
+		parts.append(compiled)
+		last = found.get_end()
+	if last < text.length():
+		parts.append(text.substr(last))
+	return parts
+
+## The text of compile_text()'s parts: each placeholder's expression run
+## (run_expr(), its errors as any expression's) and shown by display_text().
+func run_text(parts: Array) -> String:
+	var text := ""
+	for part: Variant in parts:
+		if part is CompiledExpr:
+			var compiled: CompiledExpr = part
+			if compiled.ok:
+				text += display_text(run_expr(compiled))
+		else:
+			text += str(part)
+	return text
+
+## A value as a text shows it: a float without a fraction as an integer (an
+## expression counts in floats, so `{$apples + 1}` reads "4", not "4.0"),
+## anything else as str() gives it.
+static func display_text(value: Variant) -> String:
+	if value is float and is_finite(value) and value == floorf(value) and absf(value) < 1e15:
+		return str(int(value))
+	return str(value)
+
+## `<say text="..." speaker="...">`: shows a line of dialogue through the
+## presenter's `say(speaker, text)`, `{expression}` placeholders filled in.
+## When say() returns a Signal or is a coroutine, the sequence waits for it
+## (the player pressing on); otherwise it goes on at once. Without a presenter
+## that has say(), the line is printed.
+func factory_say(args: Dictionary, _index: int) -> Callable:
+	var speaker_parts := compile_text("say", "speaker", str(args.get("speaker", "")))
+	var text_parts := compile_text("say", "text", str(args.get("text", "")))
+	return func() -> Variant:
+		var speaker := run_text(speaker_parts)
+		var text := run_text(text_parts)
+		if failed:
+			return null
+		if presenter == null or not presenter.has_method("say"):
+			print("[sequence] %s%s" % [speaker + ": " if speaker != "" else "", text])
+			return null
+		var result: Variant = presenter.callv("say", [speaker, text])
+		if result is Signal:
+			return result
+		if is_coroutine(result):
+			return Signal(result as Object, "completed")
+		return null
+
+## `<log text="...">`: hands a line to the presenter's `log(text)`,
+## `{expression}` placeholders filled in. Without a presenter that has log(),
+## the line is printed.
+func factory_log(args: Dictionary, _index: int) -> Callable:
+	var text_parts := compile_text("log", "text", str(args.get("text", "")))
+	return func() -> Variant:
+		var text := run_text(text_parts)
+		if failed:
+			return null
+		if presenter != null and presenter.has_method("log"):
+			presenter.callv("log", [text])
+		else:
+			print("[sequence] %s" % text)
+		return null
+
+## `<menu>` with `<option text="..." goto="..." requires="..." reason="..."/>`
+## children: shows the options through the presenter's `menu(options)` and
+## jumps to the picked one's label. `options` is an Array[Dictionary], one
+## {"text" (placeholders filled in), "available" (bool), "reason" (String)}
+## per option in order: an option is available unless its `requires` (an
+## expression) does not hold, and `reason` then says why (default: `requires:
+## <the expression>`). menu() answers the picked option's index: as a Signal
+## that fires with it or as a coroutine that returns it (the sequence waits),
+## or at once. An answer that is not an available option is a run-time error
+## and the first available option is taken. So it is without a presenter that
+## has menu(), with no error. With no option available the menu is a run-time
+## error and nothing jumps. No option, or an option to a label the section
+## lacks, is a compile error.
+func factory_menu(args: Dictionary, _index: int) -> Callable:
+	var options: Array = args.get(OPTIONS_ARG, [])
+	if options.is_empty():
+		compile_error("<menu> needs at least one <option>")
+	var texts: Array[Array] = []
+	var requirements: Array[CompiledExpr] = []
+	for option: Dictionary in options:
+		check_attributes("option", option, PackedStringArray(["text", "goto", "requires", "reason"]))
+		texts.append(compile_text("menu", "text", str(option.get("text", ""))))
+		requirements.append(compile_command_expr("menu", str(option.get("requires", ""))))
+	return func() -> Variant:
+		var rows: Array[Dictionary] = []
+		var first: int = -1
+		for i: int in range(options.size()):
+			var available: bool = true
+			var required := requirements[i]
+			if required != null:
+				available = required.ok and (true if run_expr(required) else false)
+			var reason := ""
+			if not available:
+				reason = str(options[i].get("reason", "requires: %s" % options[i].get("requires", "")))
+			elif first < 0:
+				first = i
+			rows.append({"text": run_text(texts[i]), "available": available, "reason": reason})
+		if failed:
+			return null
+		if first < 0:
+			run_error("menu: no option is available; the menu is skipped")
+			return null
+		if presenter == null or not presenter.has_method("menu"):
+			jump(str(options[first].get("goto", "")))
+			return null
+		var answer: Variant = presenter.callv("menu", [rows])
+		if answer is Signal or is_coroutine(answer):
+			# callv() hands back the coroutine's state (as call's methods do).
+			var state: Object = callv("_await_menu_answer", [answer, options, rows, first, _run_id])
+			return Signal(state, "completed")
+		_take_menu_answer(answer, options, rows, first)
+		return null
+
+# Waits for a presenter's menu() (its Signal, or its coroutine's state), then
+# _take_menu_answer() if the run that asked is still the current one.
+func _await_menu_answer(pending: Variant, options: Array, rows: Array[Dictionary], first: int, run_id: int) -> void:
+	var answer: Variant = await (pending if pending is Signal else Signal(pending as Object, "completed"))
+	if run_id == _run_id:
+		_take_menu_answer(answer, options, rows, first)
+
+# Jumps to the option a presenter's menu() answered, or (a run-time error) to
+# `first`, the first available one, when the answer is not an available option.
+func _take_menu_answer(answer: Variant, options: Array, rows: Array[Dictionary], first: int) -> void:
+	var picked: int = int(answer) if (answer is int or answer is float) else -1
+	if picked < 0 or picked >= rows.size() or not rows[picked]["available"]:
+		run_error("menu: the presenter answered %s, which is not an available option; option %d is taken" % [answer, first])
+		if failed:
+			return
+		picked = first
+	jump(str(options[picked].get("goto", "")))
+
+# Subroutines: <gosub> and <return/>.
+
+## How deep `<gosub>` may nest (a subroutine that calls itself...). A `<gosub>`
+## that would go deeper is a run-time error and does not jump.
+const MAX_GOSUB_DEPTH: int = 64
+
+# The gosubs under way, the innermost last: {"index": the command its
+# <return/> goes on at, "loops": the for_each loops of the code that called
+# it}. Cleared by start().
+var _gosub_stack: Array[Dictionary] = []
+
+## `<gosub label="...">`: jumps to the label and remembers the command after
+## itself, where the next `<return/>` goes on. The for_each loops under way
+## are set aside until then, so the subroutine may sit outside them and jump
+## about without ending them. A label the section lacks is a compile error.
+func factory_gosub(args: Dictionary, _index: int) -> Callable:
+	var label := str(args.get("label", ""))
+	return func() -> Variant:
+		if not labels.has(label):
+			run_error("gosub: no label \"%s\" in the section" % label)
+			return null
+		if _gosub_stack.size() >= MAX_GOSUB_DEPTH:
+			run_error("gosub: more than %d nested gosubs (MAX_GOSUB_DEPTH); \"%s\" is not run" % [MAX_GOSUB_DEPTH, label])
+			return null
+		if verbose:
+			print("Gosub: ", label)
+		_gosub_stack.append({"index": index, "loops": _for_each_states})
+		_for_each_states = {}
+		index = labels[label]
+		return null
+
+## `<return/>`: goes on after the last `<gosub>` still open, with the for_each
+## loops it set aside. With no gosub open it is a run-time error and does
+## nothing.
+func factory_return(_args: Dictionary, _index: int) -> Callable:
+	return func() -> Variant:
+		if _gosub_stack.is_empty():
+			run_error("return: no gosub to return from")
+			return null
+		var frame: Dictionary = _gosub_stack.pop_back()
+		index = frame["index"]
+		_for_each_states = frame["loops"]
+		return null
+
+## The running section's flow state: its for_each loops under way and its
+## gosubs still open, as a copy that nothing run afterwards changes. For a
+## subclass that plays another section in this runner (it swaps `sequence`,
+## `labels` and `index`): take the state, set_flow_state({}) so the other
+## section starts with none of its caller's, and put it back on the way out.
+func flow_state() -> Dictionary:
+	return {"loops": _for_each_states.duplicate(true), "gosubs": _gosub_stack.duplicate(true)}
+
+## Puts back a state flow_state() gave (a copy of it); {} leaves no loop under
+## way and no gosub open.
+func set_flow_state(state: Dictionary) -> void:
+	_for_each_states = (state.get("loops", {}) as Dictionary).duplicate(true)
+	_gosub_stack.assign((state.get("gosubs", []) as Array).duplicate(true))
+
+# Options: <choose> and <menu>, and their <option> children.
+
+## The commands whose `<option>` children the reader lists in their arguments
+## instead of reading them as commands.
+const OPTION_PARENTS: PackedStringArray = ["choose", "menu"]
+## The key of that list in the command's arguments: an Array of Dictionaries,
+## one per `<option>`, its attributes. No XML attribute can have this name.
+const OPTIONS_ARG: String = "<option>"
+
+## `<choose>` with `<option goto="..." weight="..."/>` children: jumps to one
+## option's label at random, on the runner's rng. An option's chance is its
+## `weight` (a token, default 1; 0 or less: never) over the sum of them all.
+## No option, or an option to a label the section lacks, is a compile error.
+## No weight above 0 is a run-time error and nothing jumps.
+func factory_choose(args: Dictionary, _index: int) -> Callable:
+	var options: Array = args.get(OPTIONS_ARG, [])
+	if options.is_empty():
+		compile_error("<choose> needs at least one <option>")
+	for option: Dictionary in options:
+		check_attributes("option", option, PackedStringArray(["goto", "weight"]))
+	return func() -> Variant:
+		var weights: Array[float] = []
+		var total: float = 0.0
+		for option: Dictionary in options:
+			var weight := maxf(to_float(resolve_value(str(option.get("weight", "1")))), 0.0)
+			weights.append(weight)
+			total += weight
+		if failed:
+			return null
+		if total <= 0.0:
+			run_error("choose: no option has a weight above 0")
+			return null
+		var roll := random(0.0, total)
+		var picked: int = -1
+		var passed: float = 0.0
+		for i: int in range(options.size()):
+			if weights[i] <= 0.0:
+				continue
+			picked = i
+			passed += weights[i]
+			if roll < passed:
+				break
+		jump(str(options[picked].get("goto", "")))
+		return null
+
 # Sub-sequences: <run>.
 
 # How deep this runner is in a chain of <run>s (0: started by the game).
@@ -1512,6 +1832,7 @@ func _cmd_run_section(file_token: String, section_token: String, var_name: Strin
 		var child := (get_script() as Script).new() as sequence_runner
 		child.target = target
 		child.rng = rng
+		child.presenter = presenter
 		child.verbose = verbose
 		child.stop_on_error = stop_on_error
 		child.max_instant_steps = max_instant_steps

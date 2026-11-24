@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- <choose> jumps to one of its <option>s at random, by weight. -->
+<data>
+	<sequence name="weighted">
+		<choose>
+			<option weight="3" goto="a" />
+			<option goto="b" />
+		</choose>
+		<label name="a" />
+		<set var="picked" value="'a'" />
+		<stop />
+		<label name="b" />
+		<set var="picked" value="'b'" />
+	</sequence>
+	<sequence name="zero_weight">
+		<choose>
+			<option weight="0" goto="never" />
+			<option weight="$w" goto="always" />
+			<option weight="0" goto="never" />
+		</choose>
+		<label name="never" />
+		<set var="picked" value="'never'" />
+		<stop />
+		<label name="always" />
+		<set var="picked" value="'always'" />
+	</sequence>
+	<sequence name="no_weight">
+		<choose>
+			<option weight="0" goto="a" />
+			<option weight="-2" goto="a" />
+		</choose>
+		<call method="ping" />
+		<stop />
+		<label name="a" />
+	</sequence>
+	<!-- An <option> outside a <choose> stays a command of its own. -->
+	<sequence name="after">
+		<choose>
+			<option goto="a" />
+		</choose>
+		<label name="a" />
+		<call method="ping" />
+	</sequence>
+</data>
