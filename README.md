@@ -690,6 +690,25 @@ set_flow_state(caller)
 
 The built-in `<run>` needs none of this: it plays its section on a child runner ([Sub-sequences](#sub-sequences)).
 
+### Reading Files from a Pack
+
+Sequence files kept in a ZIP, a `.pk3` or another virtual file system have no path the runner can open. Set `source_reader` to a `func(path: String) -> PackedByteArray` and the runner asks it for a file's bytes instead of opening the path. An empty result means there is no such file (`cannot be read`, as for a missing file). Unset (the default), files are opened as before.
+
+```gdscript
+var pack := ZIPReader.new()
+pack.open("user://mod.zip")
+sequence_runner.source_reader = func(path: String) -> PackedByteArray:
+    var inside := path.trim_prefix("mod://")
+    return pack.read_file(inside) if pack.file_exists(inside) else PackedByteArray()
+```
+
+Paths stay the keys, so `start()`, `start_and_wait()`, `run_once()`, `attach()`, `validate()`, `<run file="...">`, `sections()` and `has_section()` take whatever path strings the reader understands (`"mod://cards/fireball.xml"` above), and the reader is given exactly that string. `source_reader` is static: it applies to every runner in the process. A file read through it is cached per path like any file (the reader is asked once per path), so an edited file is read again only once its path is cleared from the four caches:
+
+```gdscript
+for cache: Dictionary in [sequence_runner.xml_cache, sequence_runner.trigger_cache, sequence_runner.label_cache, sequence_runner.problem_cache]:
+    cache.erase(path)
+```
+
 ## Errors and Validation
 
 Every error is reported with `push_error`, so it shows as an `ERROR:` line (and in the debugger's Errors tab), never as bare text a test could miss.
@@ -815,6 +834,7 @@ Every public name added since the regression suite, so a subclass can check it d
 | `<menu>` with `<option text goto requires reason />` | command | [Dialogue and Text](#dialogue-and-text) |
 | `factory_menu()` | method (the command's factory) | [Dialogue and Text](#dialogue-and-text) |
 | `flow_state() -> Dictionary`, `set_flow_state(state)` | methods (the running section's loops and open gosubs, to set aside and put back) | [Extending](#extending) |
+| `source_reader` | static member (Callable, `func(path: String) -> PackedByteArray`; unset by default: files are opened) | [Reading Files from a Pack](#reading-files-from-a-pack) |
 
 Without a new name:
 

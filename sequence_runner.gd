@@ -7,6 +7,10 @@ static var trigger_cache: Dictionary = {}
 static var label_cache: Dictionary = {}
 ## Compile errors found reading a file (a duplicate section...): path -> its errors.
 static var problem_cache: Dictionary = {}
+## When set, the runner asks this for a sequence file's bytes instead of opening
+## the path: `func(path: String) -> PackedByteArray`. An empty result means there is
+## no such file. Unset (the default), files are opened as before.
+static var source_reader: Callable
 
 # Reusable sequence runner. Attach to a node, set xml_path, call start().
 
@@ -792,12 +796,37 @@ static func read_sections(path: String, quiet: bool = false) -> Dictionary:
 	if xml_cache.has(path):
 		return xml_cache[path]
 	var parser := XMLParser.new()
-	var result: Dictionary = {}
-	var valid := parser.open(path) if FileAccess.file_exists(path) else ERR_FILE_NOT_FOUND
-	if valid != OK:
+	if _open_sequence_source(parser, path) != OK:
 		if not quiet:
 			push_error("sequence_runner: %s: cannot be read" % path)
-		return result
+		return {}
+	return _read_sections_from_parser(parser, path, quiet)
+
+# Opens the file at `path` in `parser`: from source_reader's bytes when it is
+# set (an empty result: ERR_FILE_NOT_FOUND), from the file otherwise.
+static func _open_sequence_source(parser: XMLParser, path: String) -> Error:
+	if source_reader.is_valid():
+		var bytes: PackedByteArray = source_reader.call(path)
+		return parser.open_buffer(bytes) if not bytes.is_empty() else ERR_FILE_NOT_FOUND
+	return parser.open(path) if FileAccess.file_exists(path) else ERR_FILE_NOT_FOUND
+
+# Whether the sequence file at `path` exists (<run>'s compile-time check).
+# Through source_reader, the file is read (and cached) as it is asked, so the
+# reader is asked once per path; problems are pushed unless `quiet`.
+static func _sequence_source_exists(path: String, quiet: bool) -> bool:
+	if xml_cache.has(path):
+		return true
+	if not source_reader.is_valid():
+		return FileAccess.file_exists(path)
+	var parser := XMLParser.new()
+	if _open_sequence_source(parser, path) != OK:
+		return false
+	_read_sections_from_parser(parser, path, quiet)
+	return true
+
+# read_sections() once `parser` holds the file at `path`: reads it, caches it.
+static func _read_sections_from_parser(parser: XMLParser, path: String, quiet: bool) -> Dictionary:
+	var result: Dictionary = {}
 	var problems := PackedStringArray()
 	var commands: Array[Dictionary] = []
 	var found_sequence := false
@@ -1801,7 +1830,7 @@ func factory_run_section(args: Dictionary, _index: int) -> Callable:
 	var var_name := str(args.get("var", ""))
 	if not file.begins_with("$") and not section.begins_with("$"):
 		var path := file if file != "" else _compile_path
-		if path != "" and FileAccess.file_exists(path) and not read_sections(path, _quiet).has(section):
+		if path != "" and _sequence_source_exists(path, _quiet) and not read_sections(path, _quiet).has(section):
 			compile_error("<run>: %s has no section \"%s\"" % [path, section])
 	return _cmd_run_section(file, section, var_name)
 
